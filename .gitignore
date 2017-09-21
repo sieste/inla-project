@@ -1,2 +1,3 @@
-docs/_knitr_cache
 .*.swp
+_site
+_knitr_cache

@@ -61,7 +61,7 @@ The goal will be to infer the posterior distribution of the AR1 parameter $\alph
 The conditional density of the observations given the latents and hyperparameters is given by
 
 \begin{align}
-\log p(y|x,\theta) & \propto \sum_t \left[ y_t \log(p_t) + (1 - y_t) \log(1 - p_t) \right] \\ 
+\log p(y\vert x,\theta) & \propto \sum_t \left[ y_t \log(p_t) + (1 - y_t) \log(1 - p_t) \right] \newline
 & = \sum_t \left[ \beta x_t y_t - \log(1 + \exp(\beta x_t)) \right]
 \end{align}
 
@@ -69,10 +69,10 @@ The AR1 process $x_1, ..., x_n$ has a joint Normal distribution with zero mean a
 Assuming that $x_1$ has prior distribution $N(0,\sigma^2 / (1-\alpha^2))$ and $x_2, ..., x_n$ have conditional distributions according to the AR1 model, the joint distribution of $x_1,...,x_n$ factorises as
 
 \begin{align}
-p(x_1, ..., x_n)  = &p(x_1) p(x_2 | x_1) p(x_3 | x_2) ... p(x_n | x_{n-1})\\
-\propto & \exp -\frac{1}{2\sigma^2} \left[ x_1^2 (1 - \alpha^2) + (x_2 - \alpha x_1)^2 + (x_3 - \alpha x_2)^2 + ... + (x_n - \alpha x_{n-1})^2  \right]\\
-\propto & \exp -\frac{1}{2\sigma^2} \left[ x_1^2 - 2\alpha x_1 x_2 + x_2^2 (1 + \alpha^2) - 2 \alpha x_2 x_3 + x_3^2 (1 + \alpha^2) - ... \right. \\
-& \left. + x_{n-1}^2 (1 + \alpha^2) - 2 \alpha x_{n-1} x_n + x_n^2 \right]\\
+p(x_1, ..., x_n)  = &p(x_1) p(x_2 \vert  x_1) p(x_3 \vert  x_2) ... p(x_n \vert  x_{n-1})\newline
+\propto & \exp -\frac{1}{2\sigma^2} \left[ x_1^2 (1 - \alpha^2) + (x_2 - \alpha x_1)^2 + (x_3 - \alpha x_2)^2 + ... + (x_n - \alpha x_{n-1})^2  \right]\newline
+\propto & \exp -\frac{1}{2\sigma^2} \left[ x_1^2 - 2\alpha x_1 x_2 + x_2^2 (1 + \alpha^2) - 2 \alpha x_2 x_3 + x_3^2 (1 + \alpha^2) - ... \right. \newline
+& \left. + x_{n-1}^2 (1 + \alpha^2) - 2 \alpha x_{n-1} x_n + x_n^2 \right]\newline
 \propto & \exp -\frac{1}{2\sigma^2} \sum_{i,j} x_i Q_{ij} x_j
 \end{align}
 
@@ -81,10 +81,10 @@ which is proportional to a multivariate Normal density with tridiagonal precisio
 
 \begin{equation}
 Q = \frac{1}{\sigma^2} \left(\begin{matrix} 
-1 & -\alpha &  &  &    \\
--\alpha & 1 + \alpha^2 & -\alpha   & &  \\
- & \ddots & \ddots & \ddots& \\
-   &  & -\alpha & 1 + \alpha^2 & -\alpha \\
+1 & -\alpha &  &  &    \newline
+-\alpha & 1 + \alpha^2 & -\alpha   & &  \newline
+ & \ddots & \ddots & \ddots& \newline
+   &  & -\alpha & 1 + \alpha^2 & -\alpha \newline
    &  &  & -\alpha & 1
 \end{matrix}\right)
 \end{equation}
@@ -95,8 +95,8 @@ The joint log-density of the observations, latents and hyperparamaters is thus g
 
 
 \begin{align}
-\log p(y,x,\theta) = & \log p(y|x,\theta) + \log p(x|\theta) + \log p(\theta) \\
- \propto &\sum_t \left[ \beta x_t y_t - \log(1 + \exp(\beta x_t)) \right] + \frac12 \log|Q| - \frac12 x'Qx + \log p(\theta)
+\log p(y,x,\theta) = & \log p(y\vert x,\theta) + \log p(x\vert \theta) + \log p(\theta) \newline
+ \propto &\sum_t \left[ \beta x_t y_t - \log(1 + \exp(\beta x_t)) \right] + \frac12 \log\vert Q\vert  - \frac12 x'Qx + \log p(\theta)
 \end{align}
 
 
@@ -134,24 +134,26 @@ ggplot(df, aes(x=i, y=value, color=variable)) +
 
 INLA is a statistical inference framework that deals with models of the following form
 
-- **observations**: $p(y|x,\theta) = \prod_i p(y_i| x_i, \theta)$, observations are generally assumed to be from the exponential family
-- **latent variables**: $\log p(x|\theta) \propto \frac12 \log|Q(\theta)| - \frac12 x'Qx$ where $Q$ is a sparse matrix so $x$ is a Gauss Markov random field
-- **hyperparameters**: $\theta \sim p(\theta)$ is a small number of hyperparameters ($< 6$)
+**observations**: $p(y \vert x,\theta) = \prod_i p(y_i \vert x_i, \theta)$, observations are generally assumed to be from the exponential family
+
+**latent variables**: $\log p(x\vert\theta) \propto \frac12 \log\vert Q(\theta)\vert - \frac12 x'Qx$ where $Q$ is a sparse matrix so $x$ is a Gauss Markov random field
+
+**hyperparameters**: $\theta \sim p(\theta)$ is a small number of hyperparameters ($< 6$)
 
 
 
-## Approximating the posterior $p(\theta | y)$
+## Approximating the posterior $p(\theta \vert y)$
 
-From the factorisation of the joint distribution
+From the (slightly unusual) factorisation of the joint distribution
 
 \begin{equation}
-\log p(y,x,\theta) = \log p(x|\theta, y) + \log p(\theta| y) + \log p(y)
+\log p(y,x,\theta) = \log p(x\vert\theta, y) + \log p(\theta\vert y) + \log p(y)
 \end{equation}
 
 we get the following expression for the posterior of the hyperparameters
 
 \begin{equation}
-\log p(\theta | y) \propto \log p(y,x,\theta) - \log p(x|y,\theta)
+\log p(\theta \vert y) \propto \log p(y,x,\theta) - \log p(x\vert y,\theta)
 \end{equation}
 
 The symbol $\propto$ is to be read as "equal up to an additive constant" when working with log-probabilities, and "equal up to a multiplicative constant" when working with probabilities.
@@ -160,29 +162,29 @@ A particularly choice of $x$ is to use the mode $x_0(\theta)$ of $\log p(y,x,\th
 Hence we will express the posterior of the hyperparameters as
 
 \begin{equation}
-\log p(\theta | y) \propto \left[ \log p(y,x,\theta) - \log p(x|y,\theta) \right]_{x=x_0(\theta)}
+\log p(\theta \vert y) \propto \left[ \log p(y,x,\theta) - \log p(x\vert y,\theta) \right]_{x=x_0(\theta)}
 \end{equation}
 
-This relationship can be used to obtain the posterior $p(\theta | y)$ up to a multiplicative constant, so the result will have to be normalised so that the posterior density integrates to 1 over all $\theta$.
+This relationship can be used to obtain the posterior $p(\theta \vert  y)$ up to a multiplicative constant, so the result will have to be normalised so that the posterior density integrates to 1 over all $\theta$.
 If the dimensionality of $\theta$ is small, normalisation is usually straightforward by numerical quadrature, using e.g. Simpson's rule.
 
 
-The challenge is now to find a good approximation of the conditional distribution of the latent variables $p(x|y,\theta)$.
-In the INLA methodology, $p(x|y,\theta)$ is approximated using the Laplace approximation.
+The challenge is now to find a good approximation of the conditional distribution of the latent variables $p(x\vert y,\theta)$.
+In the INLA methodology, $p(x\vert y,\theta)$ is approximated using the Laplace approximation.
 
 
 We first define the function $f(x)$ which is proportional to the log joint $\log p(y,x,\theta)$ taken as a function of $x$, i.e. at fixed values of $y$ and $\theta$.
-It should be emphasised that $f(x)$ is a different function for different choices of $\theta$ during the approximation of $p(\theta|y)$.
-The conditional $p(x|y,\theta)$ can always be expressed through $f(x)$ by
+It should be emphasised that $f(x)$ is a different function for different choices of $\theta$ during the approximation of $p(\theta\vert y)$.
+The conditional $p(x\vert y,\theta)$ can always be expressed through $f(x)$ by
 
 \begin{equation}
-p(x|y,\theta) = \frac{\exp[f(x)]}{\int dx \exp[f(x)]}
+p(x\vert y,\theta) = \frac{\exp[f(x)]}{\int dx \exp[f(x)]}
 \end{equation}
 
 Integrals of the form $\int dx e^{f(x)}$ can be approximated by the Laplace approximation:
 
 \begin{equation}
-\int dx \exp[f(x)] \approx \exp[f(x_0)] (2\pi)^{n/2} \big|-Hf(x_0)\big|^{-1/2}
+\int dx \exp[f(x)] \approx \exp[f(x_0)] (2\pi)^{n/2} \big\vert -Hf(x_0)\big\vert ^{-1/2}
 \end{equation}
 
 where $x_0$ is the mode of $f(x)$, $Hf(x_0)$ is the Hessian matrix of $f$ evaluated at the mode, and $n$ is the dimensionality of $x$.
@@ -196,7 +198,7 @@ f(x) = \sum_t [\beta x_t y_t - \log ( 1 + \exp(\beta x_t))] - \frac12 x'Qx
 The gradient and Hessian of $f$ are given by
 
 \begin{align}
-\nabla f (x) & = vec\left[ \beta y_i - \frac{\beta \exp(\beta x_i)}{1+\exp(\beta x_i)}\right] - Qx\\
+\nabla f (x) & = vec\left[ \beta y_i - \frac{\beta \exp(\beta x_i)}{1+\exp(\beta x_i)}\right] - Qx\newline
 Hf(x) & = - Q - diag\left[ \frac{\beta^2 \exp(\beta x_i)}{(1+\exp(\beta x_i))^2} \right]
 \end{align}
 
@@ -213,7 +215,7 @@ f(x) = -\frac12 x'Qx + \sum_i g_i(x_i)
 We Taylor expand $f(x)$, only keeping those additive terms that depend on $x$:
 
 \begin{align}
-f(x) & \approx f(x_0) + \nabla f(x_0) (x-x_0) + \frac12 (x-x_0)' Hf(x_0) (x-x_0)\\
+f(x) & \approx f(x_0) + \nabla f(x_0) (x-x_0) + \frac12 (x-x_0)' Hf(x_0) (x-x_0)\newline
 & \propto [ \nabla f (x_0) - x_0' Hf(x_0) ] x + \frac12 x' Hf(x_0) x
 \end{align}
 
@@ -264,7 +266,7 @@ calc_lprior = function(alpha, a=1, b=1) {
 
 ## The log joint distribution $p(y,x,\theta)$
 
-To calculate the determinant of $Q$ from its Cholesky decomposition $Q = L'L$ ($L$ is an upper triangular matrix), we use the identity $|Q| = \prod L_{ii}^2$ and equivalently $\log |Q| = 2 \sum_i \log L_{ii}$:
+To calculate the determinant of $Q$ from its Cholesky decomposition $Q = L'L$ ($L$ is an upper triangular matrix), we use the identity $\vert Q\vert  = \prod L_{ii}^2$ and equivalently $\log \vert Q\vert  = 2 \sum_i \log L_{ii}$:
 
 
 ```{r}
@@ -306,7 +308,7 @@ calc_neg_hess_ff = function(x, alpha) {
 ## Calculate the mode of $f(x)$
 
 ```{r}
-# the function g(x) = log(p(y|x,theta))
+# the function g(x) = log(p(y\vert x,theta))
 calc_g0 = function(x) {
   sum(beta_true * x * y - log1p(exp(beta_true * x)))
 }
@@ -361,7 +363,7 @@ The iterative and built-in method yield the same results.
 
 ## Approximating the log posterior up to an additive constant 
 
-With the above functions, approximating $\log p(\theta|y)$ up to an additive constant is straightforward:
+With the above functions, approximating $\log p(\theta\vert y)$ up to an additive constant is straightforward:
 
 ```{r}
 calc_lpost = function(alpha) {
@@ -374,7 +376,7 @@ calc_lpost = function(alpha) {
 
 ## Normalisation of the posterior
 
-Once $p(\theta|y)$ is approximated up to a constant, we can use numerical integration such as Simpson's rule to find the normalisation constant.
+Once $p(\theta\vert y)$ is approximated up to a constant, we can use numerical integration such as Simpson's rule to find the normalisation constant.
 Here is an implementation of one version called *composite Simpson's rule*:
 
 ```{r}
@@ -422,7 +424,7 @@ ggplot(df_posterior, aes(x=alpha, y=posterior)) +
 
 # R-INLA
 
-We now use the R package `INLA` to infer the posterior $p(\alpha|y)$.
+We now use the R package `INLA` to infer the posterior $p(\alpha\vert y)$.
 
 ## The AR1 parametrisation in R-INLA
 
