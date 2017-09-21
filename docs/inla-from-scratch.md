@@ -1,5 +1,3 @@
-[back](index.md)
-
 $$a^2 = b^2 + c^2$$
 
 \begin{equation}
