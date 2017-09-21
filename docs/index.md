@@ -1,3 +1,5 @@
-# Getting started
+# INLA from scratch
 
-test
+[INLA from scratch](inla-from-scratch.md)
+
+
