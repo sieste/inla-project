@@ -16,9 +16,32 @@ I have not found similar reports online, so hopefully this will be useful for ne
 
 # Load libraries
 
-```{r}
+
+```r
 library(Matrix)
 library(tidyverse)
+```
+
+```
+## Loading tidyverse: ggplot2
+## Loading tidyverse: tibble
+## Loading tidyverse: tidyr
+## Loading tidyverse: readr
+## Loading tidyverse: purrr
+## Loading tidyverse: dplyr
+```
+
+```
+## Conflicts with tidy packages ----------------------------------------------
+```
+
+```
+## expand(): tidyr, Matrix
+## filter(): dplyr, stats
+## lag():    dplyr, stats
+```
+
+```r
 knitr::opts_chunk$set(
   cache.path='_knitr_cache/inla-from-scratch/',
   fig.path='figure/inla-from-scratch/'
@@ -105,7 +128,8 @@ The joint log-density of the observations, latents and hyperparamaters is thus g
 
 We simulate data with parameter settings $n=100$, $\alpha=0.6$, $\sigma=0.1$, and $\beta=10$:
 
-```{r simulate-data}
+
+```r
 set.seed(1234)
 n = 100
 alpha_true = .6
@@ -119,7 +143,8 @@ y = rbinom(n, 1, p)
 
 We plot the latent AR1 process $x$, the corresponding Bernoulli probabilities $p$, and the observed Bernoulli trials $y$:
 
-```{r plot-data}
+
+```r
 df = data_frame(i = 1:n, x = x, p = p, y = y) %>% 
      gather(key='variable', value='value', -i) %>%
      mutate(variable = factor(variable, levels=c('x','p','y'))) 
@@ -128,6 +153,8 @@ ggplot(df, aes(x=i, y=value, color=variable)) +
   facet_wrap(~variable, ncol=1, scales='free_y') + 
   xlim(0,100) + labs(x=NULL, y=NULL)
 ```
+
+![plot of chunk plot-data](figure/inla-from-scratch/plot-data-1.png)
 
 
 # INLA theory
@@ -240,7 +267,8 @@ We next define the necessary R functions.
 
 ## The precision matrix $Q$
 
-```{r}
+
+```r
 calc_Q = function(alpha) {
   1 / sigma_true^2 * Matrix::bandSparse(n, k=0:1, 
     diagonals = list(c(1, 1 + alpha^2, 1) %>% rep(c(1, n-2, 1)), 
@@ -255,7 +283,8 @@ calc_Q = function(alpha) {
 
 The AR1 coefficient is between -1 and 1. We assume a beta prior for $(\alpha + 1) / 2$.
 
-```{r}
+
+```r
 calc_lprior = function(alpha, a=1, b=1) {
   (a-1) * log((alpha + 1) / 2) + (b-1) * log(1 - (alpha+1)/2)
 }
@@ -267,7 +296,8 @@ calc_lprior = function(alpha, a=1, b=1) {
 To calculate the determinant of $Q$ from its Cholesky decomposition $Q = L'L$ ($L$ is an upper triangular matrix), we use the identity $|Q| = \prod L_{ii}^2$ and equivalently $\log |Q| = 2 \sum_i \log L_{ii}$:
 
 
-```{r}
+
+```r
 calc_ljoint = function(y, x, alpha, sigma=0.1, a=1, b=1) {
   chol_Q = calc_Q(alpha) %>% chol
   logdet_Q_half = chol_Q %>% diag %>% log %>% sum
@@ -283,8 +313,8 @@ calc_ljoint = function(y, x, alpha, sigma=0.1, a=1, b=1) {
 ## The function $f(x)$, its gradient and its (negative) Hessian
 
 
-```{r}
 
+```r
 calc_ff = function(x, alpha) {
   sum(beta_true * x * y - log1p(exp(beta_true * x))) - 
   0.5 * drop(as.matrix(x %*% calc_Q(alpha) %*% x))
@@ -300,12 +330,12 @@ calc_neg_hess_ff = function(x, alpha) {
   calc_Q(alpha) + 
   diag(beta_true^2 * exp(beta_true * x) / (1 + exp(beta_true * x))^2)
 }
-
 ```
 
 ## Calculate the mode of $f(x)$
 
-```{r}
+
+```r
 # the function g(x) = log(p(y|x,theta))
 calc_g0 = function(x) {
   sum(beta_true * x * y - log1p(exp(beta_true * x)))
@@ -340,21 +370,28 @@ calc_x0 = function(alpha, tol=1e-12) {
 
 Here is a brute force optimisation using the built-in R function `optim`, which is 10 times slower than the iterative method above:
 
-```{r}
+
+```r
 calc_x0_brute = function(alpha) {
   optim(par=rep(0, n), fn=calc_ff, gr=calc_grad_ff, alpha=alpha, 
         control=list(fnscale=-1), method='BFGS')$par
 }
 ```
 
-```{r}
+
+```r
 # x0_fast = calc_x0(0.5)
 # x0_brute = calc_x0_brute(0.5)
 # cbind(fast=x0_fast, brute=x0_brute) %>% round(digits=4) %>% head(n=5)
 ```
 
-```{r}
+
+```r
 cbind(fast = calc_ff(x0_fast, 0.5), brute = calc_ff(x0_brute, 0.5))
+```
+
+```
+## Error in calc_ff(x0_fast, 0.5): object 'x0_fast' not found
 ```
 
 The iterative and built-in method yield the same results.
@@ -363,7 +400,8 @@ The iterative and built-in method yield the same results.
 
 With the above functions, approximating $\log p(\theta|y)$ up to an additive constant is straightforward:
 
-```{r}
+
+```r
 calc_lpost = function(alpha) {
   x0 = calc_x0(alpha)
   chol_h = chol(calc_neg_hess_ff(x0, alpha))
@@ -377,7 +415,8 @@ calc_lpost = function(alpha) {
 Once $p(\theta|y)$ is approximated up to a constant, we can use numerical integration such as Simpson's rule to find the normalisation constant.
 Here is an implementation of one version called *composite Simpson's rule*:
 
-```{r}
+
+```r
 calc_Z = function(alpha_vec, lpost_vec) {
   nn = length(alpha_vec)
   hh = alpha_vec[2] - alpha_vec[1]
@@ -392,7 +431,8 @@ calc_Z = function(alpha_vec, lpost_vec) {
 
 At this point, approximation of the unnormalised log posterior of $\alpha$ is a simple matter of an `sapply` call, and the normalisation constant can be approximated subsequently:
 
-```{r, cache=FALSE}
+
+```r
 alpha_vec = seq(-.95, .95, len=31)
 lpost = sapply(alpha_vec, calc_lpost) 
 lpost = lpost - mean(lpost) # to avoid numerical overflow
@@ -401,7 +441,8 @@ Z = calc_Z(alpha_vec, lpost)
 
 We plot the unnormalised log-posterior and the normalised posterior:
 
-```{r}
+
+```r
 df_posterior = 
   bind_rows(
     data_frame(alpha=alpha_vec, posterior=lpost, 
@@ -416,6 +457,8 @@ ggplot(df_posterior, aes(x=alpha, y=posterior)) +
   facet_wrap(~type, scale='free_y', ncol=1) +
   theme(legend.position='none')
 ```
+
+![plot of chunk unnamed-chunk-13](figure/inla-from-scratch/unnamed-chunk-13-1.png)
 
 
 
@@ -440,7 +483,8 @@ Judging from the figure below, this is a rather curious choice for a default pri
 Based on exploratory analysis, we will choose a different prior for $\theta_1$, namely $N(0, (1/0.5))$ which roughly yields a uniform distribution over $\alpha$:
 
 
-```{r, fig.height=4}
+
+```r
 df_prior = 
   bind_rows(
     data_frame(logit_alpha = rnorm(1e4,0,sqrt(1/0.15)), 
@@ -459,11 +503,30 @@ ggplot(df_prior, aes(x=value)) +
   labs(x=NULL, y=NULL)
 ```
 
+![plot of chunk unnamed-chunk-14](figure/inla-from-scratch/unnamed-chunk-14-1.png)
+
 
 ## The R-INLA implementation
 
-```{r, cache=FALSE}
+
+```r
 library(INLA)
+```
+
+```
+## Loading required package: sp
+```
+
+```
+## Loading required package: methods
+```
+
+```
+## This is INLA_17.06.20 built 2017-09-07 09:01:27 UTC.
+## See www.r-inla.org/contact-us for how to get help.
+```
+
+```r
 theta1_true = log((1-alpha_true^2)/sigma_true^2) 
 theta2_param = c(0, 0.4)
 A_mat = diag(beta_true, n, n) %>% inla.as.sparse
@@ -484,8 +547,21 @@ res = inla(
 )
 ```
 
+```
+## Note: method with signature 'Matrix#numLike' chosen for function '%*%',
+##  target signature 'dgTMatrix#numeric'.
+##  "TsparseMatrix#ANY" would also be valid
+```
 
-```{r, fig.height=4}
+```
+## Note: method with signature 'sparseMatrix#matrix' chosen for function '%*%',
+##  target signature 'dgTMatrix#matrix'.
+##  "TsparseMatrix#ANY" would also be valid
+```
+
+
+
+```r
 df_compare = bind_rows(
   res$marginals.hyperpar$`Rho for i` %>% 
     as_data_frame %>%
@@ -500,10 +576,13 @@ ggplot(data=df_compare, mapping=aes(x=alpha, y=posterior, colour=type)) +
   labs(color=NULL)
 ```
 
+![plot of chunk unnamed-chunk-16](figure/inla-from-scratch/unnamed-chunk-16-1.png)
+
 
 # Inferring the latent variable $x_t$
 
-```{r}
+
+```r
 alpha_vec = seq(-.95, .95, len=31)
 post_x = lapply(alpha_vec, function(alpha_) {
   x0_ = calc_x0(alpha_)
@@ -548,8 +627,9 @@ ggplot(df_latent, aes(x=i)) +
   geom_line(aes(y=mu_rinla), linetype='dashed') + 
   geom_ribbon(aes(ymin=lwr_rinla, ymax=upr_rinla), fill=NA, 
               color='black', linetype='dashed')
-
 ```
+
+![plot of chunk unnamed-chunk-17](figure/inla-from-scratch/unnamed-chunk-17-1.png)
 
 
 
