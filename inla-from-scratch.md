@@ -1,12 +1,14 @@
 ---
 title: INLA from scratch
 author: Stefan Siegert
-date: September 2017
+date: 22 September 2017
 layout: default
 ---
 
+# INLA from scratch
 
-## Introduction
+*Last update: 22 September 2017*
+
 
 [INLA][1] (integrated nested Laplace approximation) is a popular framework for approximate Bayesian inference in complicated space-time models.
 It can provide a significant speedup over Markov-Chain Monte-Carlo in highdimensional models.
@@ -323,7 +325,7 @@ f(x) = -\frac12 x'Qx + \sum_i g_i(x_i)
 
 where $g_i(x_i) = \log p(y_i \vert x_i, \theta)$.
 
-We Taylor expand $f(x)$, only keeping those additive terms that depend on $x$:
+We Taylor expand $f(x)$ around an initial guess of the mode $x_0$, only keeping those additive terms that depend on $x$:
 
 \begin{align}
 f(x) & \approx f(x_0) + \nabla f(x_0) (x-x_0) + \frac12 (x-x_0)' Hf(x_0) (x-x_0)\newline
@@ -331,26 +333,33 @@ f(x) & \approx f(x_0) + \nabla f(x_0) (x-x_0) + \frac12 (x-x_0)' Hf(x_0) (x-x_0)
 \end{align}
 
 where $\nabla f$ and $Hf$ are gradient vector and Hessian matrix of $f(x)$.
+Ignoring terms that do not depend on $x$ is permissible because we only want to find the mode $x_0$ of $f(x)$ which does not change when we ignore additive and multiplicative constants.
 
 The Taylor expansion approximates $f(x)$ by a parabola through $x_0$ that matches the first and second derivative of $f(x)$ at this point.
-The mode of the parabola is found by setting the first derivative to zero and solving for $x$, i.e. the mode of the parabola is given by the solution to the equation
+Since $f(x)$ is proportional to $\log p(x \vert y, \theta)$, we are in fact approximating $p(x \vert y, \theta)$ by a Normal distribution.
+The mode of the fitted parabola is found by setting its first derivative to zero and solving for $x$, so the mode of the parabola is given by the solution to the equation
 
 \begin{align}
 [Q - diag\; g^{''}_i(x_0)] x = vec\; g^{'}_i(x_0) - x_0' diag\; g^{''}_i(x_0)
 \end{align}
 
 The mode of the fitted parabola provides a new, improved estimate of the true mode of $f(x)$.
-So by repeating the process at this new improved estimate of the mode, we can find the mode of $f(x)$ iteratively.
+By repeating the process using the new improved estimate of the mode as the new test point $x_0$ of the Taylor expansion, we can find the mode of $f(x)$ iteratively.
 
 
 ## The role of the INLA restrictions
+
+I mentioned earlier that application of INLA is restricted to latent Gaussian models with a sparse precision matrix of the latent process, with sparse dependency between $y$ and $x$, and for small number of hyperparameters $\theta$.
+We can now get a better idea why these restrictions are needed.
 
 To approximate $p(\theta \vert y)$ by INLA, we will have to evaluate $p(y, x, \theta)$, find the mode $x_0$, and Laplace approximation of $p(x\vert y,\theta)$, each at many different values of $\theta$.
 The most expensive steps involve the matrix $Q$, i.e. to calculate the determinant of $Q$, the quadratic form $x'Qx$, and the determinant of the Hessian, which also involves $Q$.
 If the matrix $Q$ is sparse, the complexity of calculating the determinant and quadratic form reduces dramatically compared to a dense matrix.
 This is why we use Gauss-Markov random fields to model the latent process $x$.
+
 The Hessian of $f(x)$ is the sum of the sparse matrix $Q$ and the matrix of second derivatives of the conditional log density of the observations given $x$.
-If each $y_t$ only depends on a small number of latent variables $x_t$ the matrix of second derivatives will be sparse, and therefore the Hessian is sparse as well which makes calculation of the Laplace approximation efficient.
+If each $y_t$ only depends on a small number of latent variables $x_t$ the matrix of second derivatives will be sparse, and therefore the Hessian is sparse as well which makes calculation of the determinant in the Laplace approximation efficient.
+
 Lastly, by limiting the number of hyperparameters $\theta$, the number of evaluations of the INLA algorithm is limited to a manageable amount, and numerical integration by simple quadrature isn't too expensive.
 
 
@@ -561,10 +570,10 @@ R-INLA specifies a Normal prior for $\theta_2$, whereas we have specified a unif
 
 ## The R-INLA default prior for $\alpha$
 
-It is worthwhile to have a look at the default $N(0,1/0.15)$ prior for $logit(\alpha)$ used by R-INLA.
+It is worthwhile to have a look at the default $N(0,1/0.15)$ prior for $logit(\alpha)$ used by R-INLA (the documentation of the AR1 model in R-INLA can be found [here](http://www.r-inla.org/models/latent-models)).
 Judging from the figure below, this is a rather curious choice for a default prior, as it will strongly bias the posterior of $\alpha$ away from zero, towards +1 and -1.
 Based on exploratory analysis, we will choose a different prior for $\theta_1$, namely $N(0, (1/0.5))$ which yields a distribution over $\alpha$ that is much closer to uniform.
-Note that a completely uniform distribution cannot be achieved with this parametrisation.
+Note that a completely uniform distribution for $\alpha$ cannot be achieved with a Normal prior on $logit(\alpha)$.
 
 
 
@@ -689,7 +698,7 @@ Then we approximate $p(x \vert y)$ by a mixture of Normal distributions with wei
 
 We will probably be interested in marginal variances of the individual $x_t$.
 To get those we have to invert the precision matrices of the Normal distributions in the mixture to get the covariance matrix.
-Then we can calculate each marginal posterior mean and variance as mean and variance of a Normal mixture through the relations
+Then we can calculate each marginal posterior mean and variance as mean and variance of a Normal mixture through the [relations](https://en.wikipedia.org/wiki/Mixture_distribution#Moments)
 
 \begin{align}
 E[X] & = \mu = \sum_i w_i \mu_i \newline
@@ -762,14 +771,49 @@ ggplot(df_latent, aes(x=i)) +
 ![plot of chunk plot-post-latent](figure/inla-from-scratch/plot-post-latent-1.png)
 
 
+## Differences to R-INLA 
+
+My results are close, but not identical to the results obtained with the R package.
+The best explanation for the difference is, of course, that I made a mistake somewhere along the way.
+But even if my implementation is correct, we should expect differences.
+
+The prior I used was similar, but not identical to prior in R-INLA.
+I tried slightly larger sample sizes to suppress the influence of the prior, but the two solutions do not seem to converge.
+Due to the hierarchical structure of the model, there seems to be some irreducible uncertainty about $\alpha$ when trying to infer it from $y$.
+So the posterior never becomes infinitely sharp even with huge sample sizes.
+I found that both my posterior and the R-INLA posterior cover the true $\alpha$ equally well, but at the same time the two distributions don't perfectly cover each other.
+
+
+R-INLA is much cleverer than I am when selecting the points at which to evaluate $p(\theta \vert y)$.
+I just used equally spaced points that cover the entire domain $(-1, 1)$.
+R-INLA samples more points close to the mode, and less points in the boring region below zero where the posterior density is vanishingly low.
+
+
+The posterior of the latent process $x_t$ differs as well.
+This can partly be explained by the slightly different priors.
+But (as far as I know) R-INLA also implements a third-order correction to improve upon the Laplace approximation of $p(x \vert y, \theta)$.
+Furthermore, I evaluated the posterior $p(\theta \vert y)$ at different $\theta$ values than R-INLA.
+Since the $p(\theta_i \vert y)$ enter as weights in the Normal mixture distribution some differences are to be expected as well.
+My posterior means are less smooth than the R-INLA means, which is consistent with my posterior mean for $\alpha$ being smaller than that of R-INLA.
+Also, my credible intervals are wider than those of R-INLA. 
+
+
+Lastly, the capabilities of R-INLA are not limited to what I showed here.
+R-INLA can compute posterior predictive distributions for future values of $y_t$, posterior distibutions of transformed variables, and much more.
+
+
+
 
 ## Conclusions
 
 INLA is an efficient method for approximate Bayesian inference in latent Gaussian models with sparse dependency structure.
+The crucial step is to approximate the conditional distribution of the latent process $p(x \vert y, \theta)$ by a Normal distribution.
+This approximation reduces the computational complexity in high-dimensional problems, and leads to semi-analytic solutions of posterior distributions that are of interest in Bayesian inference.
+The framework is applicable to a wide range of hierarchical Bayesian models, with a few sparsity constraints on the dependency structure.
 
-In this report I showed how to apply INLA to approximate the posterior distribution of the autocorrelation parameter of an AR1-Bernoulli process. 
-
-The results broadly agree with the results obtained by the popular R package `INLA`.
+The INLA framework is not identical to the R package `INLA`, that is, you do not have to install the R package to apply INLA.
+I showed how to implement INLA to approximate the posterior distribution of the autocorrelation parameter of a simple AR1-Bernoulli process. 
+The results broadly agree with the results obtained with the R package.
 
 
 
