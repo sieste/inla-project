@@ -27,32 +27,9 @@ The report was written in R markdown, converted to markdown with [knitr](https:/
 
 ## Load libraries
 
-
-```r
+```{r load-libs}
 library(Matrix)
 library(tidyverse)
-```
-
-```
-## Loading tidyverse: ggplot2
-## Loading tidyverse: tibble
-## Loading tidyverse: tidyr
-## Loading tidyverse: readr
-## Loading tidyverse: purrr
-## Loading tidyverse: dplyr
-```
-
-```
-## Conflicts with tidy packages ----------------------------------------------
-```
-
-```
-## expand(): tidyr, Matrix
-## filter(): dplyr, stats
-## lag():    dplyr, stats
-```
-
-```r
 knitr::opts_chunk$set(
   cache.path='_knitr_cache/inla-from-scratch/',
   fig.path='figure/inla-from-scratch/'
@@ -117,8 +94,7 @@ The goal will be to infer the posterior distribution of the AR1 parameter $\alph
 
 We simulate data from the toy model with parameter settings $n=100$, $\alpha=0.6$, $\sigma=0.1$, and $\beta=10$, and plot time series of $x_t$, $p_t$, and $y_t$.
 
-
-```r
+```{r simulate-data}
 set.seed(1234)
 n = 100
 alpha_true = .6
@@ -141,8 +117,6 @@ ggplot(df, aes(x=i, y=value, color=variable)) +
   facet_wrap(~variable, ncol=1, scales='free_y') + 
   xlim(0,100) + labs(x=NULL, y=NULL)
 ```
-
-![plot of chunk simulate-data](figure/inla-from-scratch/simulate-data-1.png)
 
 
 
@@ -364,8 +338,7 @@ We next define the necessary R functions.
 
 ### The sparse precision matrix $Q$
 
-
-```r
+```{r calc-Q}
 calc_Q = function(alpha) {
   1 / sigma_true^2 * Matrix::bandSparse(n, k=0:1, 
     diagonals = list(c(1, 1 + alpha^2, 1) %>% rep(c(1, n-2, 1)), 
@@ -380,8 +353,7 @@ calc_Q = function(alpha) {
 
 The AR1 coefficient is between -1 and 1. We assume a beta prior for $(\alpha + 1) / 2$, with default values set to 1 so the prior is uniform.
 
-
-```r
+```{r calc-prior}
 calc_lprior = function(alpha, a=1, b=1) {
   (a-1) * log((alpha + 1) / 2) + (b-1) * log(1 - (alpha+1)/2)
 }
@@ -394,8 +366,7 @@ We calculate the determinant of $Q$ from its Cholesky decomposition $Q = L'L$ ($
 We use the identity $\vert Q\vert  = \prod L_{ii}^2$ and equivalently $\log \vert Q\vert  = 2 \sum_i \log L_{ii}$:
 
 
-
-```r
+```{r calc-ljoint}
 calc_ljoint = function(y, x, alpha, a=1, b=1) {
   chol_Q = calc_Q(alpha) %>% chol
   logdet_Q_half = chol_Q %>% diag %>% log %>% sum
@@ -411,8 +382,8 @@ calc_ljoint = function(y, x, alpha, a=1, b=1) {
 ### The function $f(x)$, its gradient and its negative Hessian
 
 
+```{r calc-f}
 
-```r
 calc_ff = function(x, alpha) {
   sum(beta_true * x * y - log1p(exp(beta_true * x))) - 
   0.5 * drop(as.matrix(x %*% calc_Q(alpha) %*% x))
@@ -433,8 +404,7 @@ calc_neg_hess_ff = function(x, alpha) {
 
 ### Calculate the mode of $f(x)$
 
-
-```r
+```{r calc-x0}
 # the function g(x) = log(p(y | x,theta)), its gradient and hessian
 calc_g0 = function(x) {
   sum(beta_true * x * y - log1p(exp(beta_true * x)))
@@ -467,8 +437,7 @@ calc_x0 = function(alpha, tol=1e-12) {
 
 Here is a brute force optimisation using the built-in R function `optim`, which is 10 times slower than the iterative method above, but gives the same result:
 
-
-```r
+```{r calc-x0-brute}
 calc_x0_brute = function(alpha) {
   optim(par=rep(0, n), fn=calc_ff, gr=calc_grad_ff, alpha=alpha, 
         control=list(fnscale=-1), method='BFGS')$par
@@ -480,8 +449,7 @@ calc_x0_brute = function(alpha) {
 
 With the above functions, approximating $\log p(\theta\vert y)$ up to an additive constant is straightforward:
 
-
-```r
+```{r calc-lpost}
 calc_lpost = function(alpha) {
   x0 = calc_x0(alpha)
   chol_h = chol(calc_neg_hess_ff(x0, alpha))
@@ -497,8 +465,7 @@ lpost = sapply(alpha_vec, calc_lpost)
 Once $p(\theta\vert y)$ is approximated up to a constant, we can use numerical integration such as Simpson's rule to find the normalisation constant.
 Here is an implementation using the [composite Simpson's rule](https://en.wikipedia.org/wiki/Simpson%27s_rule#Composite_Simpson.27s_rule):
 
-
-```r
+```{r calc-Z}
 calc_Z = function(alpha_vec, lpost_vec) {
   nn = length(alpha_vec)
   hh = alpha_vec[2] - alpha_vec[1]
@@ -513,16 +480,14 @@ calc_Z = function(alpha_vec, lpost_vec) {
 
 At this point, approximation of the unnormalised log posterior of $\alpha$ is a simple matter of an `sapply` call, and the normalisation constant can be approximated subsequently:
 
-
-```r
+```{r inla-from-scratch}
 lpost = lpost - mean(lpost) # to avoid numerical overflow
 Z = calc_Z(alpha_vec, lpost)
 ```
 
 We plot the unnormalised log-posterior and the normalised posterior:
 
-
-```r
+```{r plot-inla-from-scratch}
 # data frame for plotting
 df_posterior = 
   bind_rows(
@@ -540,8 +505,6 @@ ggplot(df_posterior, aes(x=alpha, y=posterior)) +
   facet_wrap(~type, scale='free_y', ncol=1) +
   theme(legend.position='none')
 ```
-
-![plot of chunk plot-inla-from-scratch](figure/inla-from-scratch/plot-inla-from-scratch-1.png)
 
 
 
@@ -567,8 +530,7 @@ Based on exploratory analysis, we will choose a different prior for $\theta_1$, 
 Note that a completely uniform distribution cannot be achieved with this parametrisation.
 
 
-
-```r
+```{r plot-prior, fig.height=4}
 # data frame for plotting
 df_prior = 
   bind_rows(
@@ -589,30 +551,11 @@ ggplot(df_prior, aes(x=value)) +
   labs(x=NULL, y=NULL)
 ```
 
-![plot of chunk plot-prior](figure/inla-from-scratch/plot-prior-1.png)
-
 
 ## The R-INLA implementation
 
-
-```r
+```{r r-inla}
 library(INLA)
-```
-
-```
-## Loading required package: sp
-```
-
-```
-## Loading required package: methods
-```
-
-```
-## This is INLA_17.06.20 built 2017-09-07 09:01:27 UTC.
-## See www.r-inla.org/contact-us for how to get help.
-```
-
-```r
 theta1_true = log((1-alpha_true^2)/sigma_true^2) 
 theta2_param = c(0, 0.5)
 A_mat = diag(beta_true, n, n) %>% inla.as.sparse
@@ -633,21 +576,8 @@ res = inla(
 )
 ```
 
-```
-## Note: method with signature 'Matrix#numLike' chosen for function '%*%',
-##  target signature 'dgTMatrix#numeric'.
-##  "TsparseMatrix#ANY" would also be valid
-```
 
-```
-## Note: method with signature 'sparseMatrix#matrix' chosen for function '%*%',
-##  target signature 'dgTMatrix#matrix'.
-##  "TsparseMatrix#ANY" would also be valid
-```
-
-
-
-```r
+```{r plot-compare, fig.height=4}
 # data frame for plotting
 df_compare = bind_rows(
   res$marginals.hyperpar$`Rho for i` %>% 
@@ -664,8 +594,6 @@ ggplot(data=df_compare, mapping=aes(x=alpha, y=posterior, colour=type)) +
   geom_vline(aes(xintercept=alpha_true)) + 
   labs(color=NULL)
 ```
-
-![plot of chunk plot-compare](figure/inla-from-scratch/plot-compare-1.png)
 
 
 ## Approximating the posterior of the latent variables $p(x \vert y)$
@@ -702,8 +630,7 @@ Below we go through the whole process of approximating $p(\theta \vert y)$ once 
 In a proper implementation, $p(\theta \vert y)$ and $p(x \vert y)$ can obviously be inferred in one pass.
 
 
-
-```r
+```{r calc-post-latent}
 # approximate p(x | y, alpha) for many values of alpha
 alpha_vec = seq(-.95, .95, len=31)
 post_x = lapply(alpha_vec, function(alpha_) {
@@ -736,8 +663,7 @@ sigma_post =
 ```
 
 
-
-```r
+```{r plot-post-latent, fig.width=10, fig.height=4}
 # data frame for plotting
 df_latent = bind_rows(
   data_frame(
@@ -758,8 +684,6 @@ ggplot(df_latent, aes(x=i)) +
               fill=NA) +
   geom_line(aes(y=mu, color=type)) + labs(alpha=NULL, linetype=NULL, color=NULL, x=NULL, y=NULL)
 ```
-
-![plot of chunk plot-post-latent](figure/inla-from-scratch/plot-post-latent-1.png)
 
 
 
