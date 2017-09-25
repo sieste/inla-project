@@ -1,3 +1,4 @@
 .*.swp
 _site
 _knitr_cache
+private

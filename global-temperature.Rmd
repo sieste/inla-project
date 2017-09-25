@@ -1,0 +1,318 @@
+---
+title: Global mean surface temperature projection
+author: Stefan Siegert
+date: September 2017
+layout: default
+---
+
+# Global mean surface temperature projection
+
+*Last update: 25 September 2017*
+
+
+```{r}
+suppressPackageStartupMessages(library(INLA))
+suppressPackageStartupMessages(library(tidyverse))
+knitr::opts_chunk$set(
+  cache.path='_knitr_cache/global-temperature/',
+  fig.path='figure/global-temperature/'
+)
+```
+
+- [CMIP5][a-cmip5]
+- "Coupled Model Intercomparison Project"
+- coordinated climate model experiments
+- [data access][a-cmip5-data]
+- annually and globally averaged surface temperatures
+- RCP4.5 (representative concentration pathway), moderate emissions, "realistic"
+
+
+- [HadCRUT4 data download][a-hadcrut]
+- global, annual time series
+- 100 member median
+- ignoring the uncertainty information provided
+
+
+[a-cmip5]: http://cmip-pcmdi.llnl.gov/cmip5/index.html
+[a-cmip5-data]: http://cmip-pcmdi.llnl.gov/cmip5/data_getting_started.html
+[a-hadcrut]: https://www.metoffice.gov.uk/hadobs/hadcrut4/data/current/download.html
+
+
+
+```{r plot-cmip5-data, echo=FALSE, fig.height=5}
+load('private/cmip5_rcp45_gmst-tidy.Rdata')
+load('private/hadcrut4_gmst-tidy.Rdata')
+
+gmst_mod = gmst_mod %>% filter(year>1860, year <= 2100)
+gmst_obs = hadcrut4_gmst %>% 
+           select(-gmst_anom) %>%
+           filter(year > 1860, year <= 2100)
+ggplot() + 
+  geom_line(data=gmst_mod, aes(x=year, y=gmst, color=model)) + 
+  geom_line(data=gmst_obs, aes(x=year, y=gmst_abs), lwd=1.5, na.rm=TRUE) +
+  theme(legend.position = 'none') +
+  labs(x=NULL, y='Global mean temperature [C]', color=NULL) +
+  ggtitle('CMIP5 simulations (RCP4.5), HadCRUT4 observations')
+```
+
+I'm not sure whether or not I'm allowed to publish the raw CMIP5 data here, which means that I am probably not.
+So I simulated some artificial data to work with that looks similar to the real CMIP5 global temperature projections.
+You can find the simulation code in the [repository](https://www.github.com/sieste/inla-project), file `global-temperature.Rmd`, code block `simulate-data`.
+
+
+
+```{r simulate-data, eval=FALSE, echo=FALSE}
+# simulate data
+set.seed(23)
+years = 1861:2100
+n = length(years)
+m = pnorm(years, mean=2020, sd=40) * 2.5 + 13
+sim_mod = replicate(35, 
+  m +                                     # common mean
+  rnorm(1, 0, .5) +                       # constant bias
+  rnorm(n, 0, .1+runif(1,-.07, .07)) +    # gaussian noise with random sd
+  cumsum(rnorm(n, 0, .03))                # random walk drift
+)
+colnames(sim_mod) = levels(as.factor(gmst_mod$model))
+
+set.seed(23)
+sim_obs = m + .3 + rnorm(n, 0, .1) + cumsum(rnorm(n, 0, .03))
+
+gmst_mod_sim = 
+  gmst_mod %>% 
+  group_by(model) %>% 
+  mutate(gmst = sim_mod[, levels(as.factor(model))]) %>% 
+  ungroup
+
+gmst_obs_sim = 
+  gmst_obs %>%
+  as_data_frame %>%
+  mutate(gmst_abs = sim_obs[1:nrow(gmst_obs)]) %>%
+  rename(gmst = gmst_abs)
+
+save(file='data/gmst_sim.Rdata', list=c('gmst_mod_sim', 'gmst_obs_sim'))
+```
+
+The simulated data is saved in the `data` directory, and here is the psychedelic spaghetti plot:
+
+```{r plot-simulated-data, fig.height=5}
+load('data/gmst_sim.Rdata')
+ggplot() + 
+  geom_line(data=gmst_mod_sim, aes(x=year, y=gmst, color=model)) + 
+  geom_line(data=gmst_obs_sim, aes(x=year, y=gmst), lwd=1.5, na.rm=TRUE) +
+  theme(legend.position = 'none') +
+  labs(x=NULL, y='Global mean temperature [C]', color=NULL) + 
+  ggtitle('ARTIFICIAL DATA')
+```
+
+The Rougier et al (2013) framework for exchangeable model runs and co-exchangeable observations.
+
+- common mean 
+- independent residuals
+- discrepancy
+
+\begin{equation}
+X_{i,t} = M_t + R_{i,t}
+\end{equation}
+
+\begin{equation}
+Y_{t} = A M_t + U_{t}
+\end{equation}
+
+\begin{equation}
+Z = H Y + W
+\end{equation}
+
+How should we model this data?
+
+**common mean** 
+
+- highly constrained by the model runs, could just use the ensemble mean
+- but want to integrate this into the inference with INLA
+- model as a non-stationary random process with temporal correlation
+- random walk with constant variance of increments 
+
+
+**residuals**
+
+- constant offset
+- AR1 process
+- random walk drift
+
+**discrepancy**
+
+- will assume that $var(U) = var(R)$ and $E(U) = 0$
+- observations are exchangeable with model runs
+
+### R-INLA
+
+
+```{r gmst-inla}
+inla_formula = gmst ~ 
+                 -1 + 
+                 f(i1, model='rw1') +                  
+                 f(i2, model='iid', replicate=repl) +  
+                 f(i3, model='ar1', replicate=repl) + 
+                 f(i4, model='rw1', replicate=repl, 
+                       prior='loggamma', param=c(25, .25))
+
+inla_data = 
+  gmst_mod_sim %>%
+  bind_rows(
+    gmst_obs_sim %>% 
+    bind_rows(data_frame(year=2018:2100, gmst=NA_real_)) %>%
+    mutate(model = 'obs')
+  ) %>%
+  mutate(model = as.factor(model)) %>%
+  mutate(i1 = year) %>%
+  mutate(i2 = 1L) %>%
+  mutate(i3 = year) %>%
+  mutate(i4 = year) %>%
+  mutate(repl = as.integer(model))
+```
+
+
+We can now fire up INLA.
+We tell INLA that our observations are "perfect" via `family='gaussian'` with very high precision. 
+We also set `config=TRUE` to be able to simulate from the posterior later on.
+
+```{r run-inla, cache=TRUE}
+inla_result = inla(formula=inla_formula, data=inla_data, family='gaussian', 
+              control.family=list(initial=12, fixed=TRUE),
+              control.compute=list(config=TRUE))
+```
+
+The code takes about a minute to run on my laptop, so in this case INLA does not feel as lightning fast as it is sometimes advertised.
+On the other hand, inferring this model using MCMC would probably take hours.
+
+Now we sample from the posteriors, using the function `inla.posterior.sample()`.
+I am not 100 percent sure what is going on under the hood of this function.
+For example, I don't know what algorithm is used to draw the samples.
+The help file isn't terribly enlightening.
+But after looking at the results further down I think it is doing something reasonable.
+
+```{r sample-inla, cache=TRUE}
+set.seed(23)
+inla_sampls = inla.posterior.sample(n=100, result=inla_result, seed=42) 
+```
+
+The output is a list of length 100 (number of samples).
+Each sample creates a list with elements `hyperpar`, `latent`, and `logdens`.
+We are interested in the `latent` samples, as these also contain samples named `Predictor`.
+In fact there are 8640 `Predictor` samples:
+
+```{r}
+inla_sampls[[1]][['latent']] %>% str
+inla_sampls[[1]][['latent']] %>% rownames %>% grep(x=., 'Predictor', value=TRUE) %>% range
+```
+
+Since 8640 is the length of the model plus observation data frame, I am guessing that the predictors map to the rows of the `inla_data` data frame.
+So we have to find those predictors that correspond to `model == obs`.
+This is what the following chunk of code does.
+The output of `inla.sample.posterior` is not "tidy", so there is a bit of data wrangling necessary.
+
+
+```{r extract-obs}
+obs_inds = paste('Predictor:', which(inla_data$model == 'obs'), sep='')
+obs_sampls = 
+  inla_sampls %>% # inla_sampls is a list of length 'number of samples'
+    map('latent') %>% # extract latents
+    map(drop) %>%  # 1 column matrix to vector
+    map(`[`, obs_inds) %>% # extract correct indices
+    map(setNames, nm=levels(as.factor(inla_data$year))) %>% # set names to year
+    map_df(enframe, .id='sample', name='year') %>% # to long data frame 
+    mutate_if(is.character, as.integer) %>%
+    rename(gmst = value)
+```
+
+The posterior sample data is now ready to be plotted:
+
+```{r plot-inla-projection, fig.height=5}
+ggplot() +
+  geom_line(data=gmst_mod_sim, aes(x=year, y=gmst, color=model)) +
+  geom_line(data=obs_sampls, aes(x=year, y=gmst, group=sample), color='black') +
+  theme(legend.position = 'none') +
+  ggtitle('ARTIFICIAL DATA')
+```
+
+```{r plot-posterior-mean-variance, fig.height=5}
+post_df = obs_sampls %>%
+  group_by(year) %>%
+  summarise(post_mean = mean(gmst), post_sd = sd(gmst)) %>%
+  mutate(lwr = post_mean - 2 * post_sd, upr = post_mean + 2 * post_sd)
+
+ggplot(data=post_df, aes(x=year)) +
+  geom_line(data=gmst_mod_sim, aes(y=gmst, color=model), na.rm=TRUE) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr)) +
+  geom_line(aes(y=post_mean), lwd=2, na.rm=TRUE) +
+  theme(legend.position = 'none') +
+  ylim(14, 17) + xlim(2000, 2100) +
+  labs(x=NULL, y='Global mean temperature [C]') +
+  ggtitle('ARTIFICIAL DATA')
+```
+
+
+# The real world
+
+I have applied the same analysis to the actual CMIP5 data and produced equivalent plots.
+
+
+```{r inla_cmip5, cache=TRUE, eval=TRUE, echo=FALSE}
+inla_data = 
+  gmst_mod %>% 
+  bind_rows(
+    gmst_obs %>%
+    rename(gmst = gmst_abs) %>%
+    bind_rows(data_frame(year=2018:2100, gmst=NA_real_)) %>%
+    mutate(model = 'obs')
+  ) %>% 
+  mutate(model = as.factor(model)) %>%
+  mutate(i1 = year) %>%
+  mutate(i2 = 1L) %>%
+  mutate(i3 = year) %>%
+  mutate(i4 = year) %>%
+  mutate(repl = as.integer(model))
+  
+inla_result = inla(formula=inla_formula, data=inla_data, family='gaussian', 
+              control.family=list(initial=12, fixed=TRUE),
+              control.compute=list(config=TRUE))
+
+set.seed(23)
+inla_sampls = inla.posterior.sample(n=100, result=inla_result, seed=42) 
+
+obs_inds = paste('Predictor:', which(inla_data$model == 'obs'), sep='')
+obs_sampls = 
+  inla_sampls %>% map('latent') %>% map(drop) %>%  
+    map(`[`, obs_inds) %>% map(setNames, nm=levels(as.factor(inla_data$year))) %>% 
+    map_df(enframe, .id='sample', name='year') %>% mutate_if(is.character, as.integer) %>%
+    rename(gmst = value)
+```
+
+
+```{r plot-inla-cmip5, fig.height=5, echo=FALSE}
+ggplot() +
+  geom_line(data=gmst_mod, aes(x=year, y=gmst, color=model)) +
+  geom_line(data=obs_sampls, aes(x=year, y=gmst, group=sample), color='black') +
+  theme(legend.position = 'none') +
+  labs(x=NULL, y='Global mean temperature [C]') +
+  ggtitle('CMIP5 simulations (RCP4.5), HadCRUT4 observations')
+```
+
+```{r plot-inla-cmip5-mean-var, fig.height=5, echo=FALSE}
+post_df = obs_sampls %>%
+  group_by(year) %>%
+  summarise(post_mean = mean(gmst), post_sd = sd(gmst)) %>%
+  mutate(lwr = post_mean - 2 * post_sd, upr = post_mean + 2 * post_sd)
+
+ggplot(data=post_df, aes(x=year)) +
+  geom_line(data=gmst_mod, aes(y=gmst, color=model), na.rm=TRUE) +
+  geom_ribbon(aes(ymin=lwr, ymax=upr)) +
+  geom_line(aes(y=post_mean), lwd=2, na.rm=TRUE) +
+  theme(legend.position = 'none') +
+  ylim(14, 17) + xlim(2000, 2100) +
+  labs(x=NULL, y='Global mean temperature [C]') +
+  ggtitle('CMIP5 simulations (RCP4.5), HadCRUT4 observations')
+```
+
+
+

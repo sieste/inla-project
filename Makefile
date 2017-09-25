@@ -1,6 +1,8 @@
+all: global-temperature
+
 inla-from-scratch: inla-from-scratch.md
+global-temperature: global-temperature.md
 
-inla-from-scratch.md: inla-from-scratch.Rmd
-	Rscript -e 'knitr::knit("inla-from-scratch.Rmd")'
-
+%.md: %.Rmd
+	Rscript -e 'knitr::knit("$<")'
 
