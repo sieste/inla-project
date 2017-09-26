@@ -7,7 +7,7 @@ layout: default
 
 # Global mean surface temperature projection
 
-*Last update: 25 September 2017*
+*Last update: 26 September 2017*
 
 
 ```{r}
@@ -19,24 +19,21 @@ knitr::opts_chunk$set(
 )
 ```
 
-- [CMIP5][a-cmip5]
-- "Coupled Model Intercomparison Project"
-- coordinated climate model experiments
-- [data access][a-cmip5-data]
-- annually and globally averaged surface temperatures
-- RCP4.5 (representative concentration pathway), moderate emissions, "realistic"
+[CMIP5][a-cmip5] ("Coupled Model Intercomparison Project") is a coordinated climate modeling experiments set up by climate centers around the world to compare their climate model results.
+Data from the CMIP5 runs [can be downloaded][a-cmip5-data] by researchers for free after asking for permission. 
+For this project, I looked at annually and globally averaged surface temperatures simulated by 35 different climate models.
+All models were run from 1860 to 2100 under emission scenario RCP4.5 (RCP stands for "representative concentration pathway") which is considered a moderate, neither overly optimistic nor pessimistic, trajectory of future green house gas emissions.
 
-
-- [HadCRUT4 data download][a-hadcrut]
-- global, annual time series
-- 100 member median
-- ignoring the uncertainty information provided
-
+I have also downloaded observed global mean temperatures from the [HadCRUT4 data set][a-hadcrut].
+These historical temperature reconstructions come as a collection of 100 ensemble members to estimate observational uncertainty.
+I simply took the 100 member median and ignored the uncertainty information provided, effectively treating the observations as perfect.
+The observed global mean temperatures are currently available for 1860 to 2017.
 
 [a-cmip5]: http://cmip-pcmdi.llnl.gov/cmip5/index.html
 [a-cmip5-data]: http://cmip-pcmdi.llnl.gov/cmip5/data_getting_started.html
 [a-hadcrut]: https://www.metoffice.gov.uk/hadobs/hadcrut4/data/current/download.html
 
+Below is a plot of the entire data set.
 
 
 ```{r plot-cmip5-data, echo=FALSE, fig.height=5}
@@ -58,7 +55,6 @@ ggplot() +
 I'm not sure whether or not I'm allowed to publish the raw CMIP5 data here, which means that I am probably not.
 So I simulated some artificial data to work with that looks similar to the real CMIP5 global temperature projections.
 You can find the simulation code in the [repository](https://www.github.com/sieste/inla-project), file `global-temperature.Rmd`, code block `simulate-data`.
-
 
 
 ```{r simulate-data, eval=FALSE, echo=FALSE}
@@ -93,7 +89,8 @@ gmst_obs_sim =
 save(file='data/gmst_sim.Rdata', list=c('gmst_mod_sim', 'gmst_obs_sim'))
 ```
 
-The simulated data is saved in the `data` directory, and here is the psychedelic spaghetti plot:
+The simulated data is saved in the `data` directory. 
+Here is the psychedelic spaghetti plot:
 
 ```{r plot-simulated-data, fig.height=5}
 load('data/gmst_sim.Rdata')
@@ -105,49 +102,101 @@ ggplot() +
   ggtitle('ARTIFICIAL DATA')
 ```
 
-The Rougier et al (2013) framework for exchangeable model runs and co-exchangeable observations.
+The goal is to use all the data, the climate model simulations and the historical observations of the real world (black line) to predict the future evolution of the real world.
+There are a few difficulties though.
 
-- common mean 
-- independent residuals
-- discrepancy
+Most models do not reproduce past climate very well.
+The simulated historical temperatures range from 12 to 14 degrees which constitutes a significant range around the relatively stable 13.25 degrees measured in the real world up to 1950.
+Should we discard those models that can't replicate past climate?
+Or does the fact that all model runs increase over time tell us something about the real world?
+Given that all those models have hard climate science and decades of expertise behind them, we should be wary to throw any data away.
+
+We should not interpret the range of simulated temperatures in 2100 as "the uncertainty range" about future climate.
+If we did this, we would also have to interpret the simulated temperature range for next year (2018) as "the uncertainty range" for 2018.
+This is obviously nonsense to think that next years temperature is likely to be between 13.5 and 15.5 degrees, if the biggest year-to-year increment we have ever observed is on the order of 0.2 degrees.
+Temperature projections of the near future should be close to the last recorded temperature value, because this is how the climate system seems to behave given everything we know.
+So uncertainty ranges in the near future should be narrower than for the far future, and all projections should be constrained by the historical observations.
+
+How do we use all the available information, while avoiding these pitfalls?
+Enter the Rougier et al (2013) framework.
+
+
+## The co-exchangeable framework
+
+
+[Rougier et al (2013)](http://dx.doi.org/10.1080/01621459.2013.802963) published an inferential framework for a collection of climate model runs that are judged to be exchangeable, i.e. no climate model is a priori different from the others, and a real world climate that is co-exchangeable with the model climates, i.e. no climate model is a priori better at representing the real world than any other.
+Under some constraints on how beliefs are expressed statistically, the co-exchangeable collection of model runs and their relationship to the real world are expressed by the following statistical model.
+
+Climate model runs $X_1, ..., X_m$, each of which can be a high-dimensional vector containing simulation of past and future climate, is represented as the sum of a common mean $M$ and mutually independent, zero-mean residuals $R_i$:
 
 \begin{equation}
 X_{i,t} = M_t + R_{i,t}
 \end{equation}
 
+The real world climate, which is co-exchangeable with the model runs, is expressed in terms of the common mean $M$ by
+
 \begin{equation}
 Y_{t} = A M_t + U_{t}
 \end{equation}
+
+where $A$ is a constant matrix (set to $1$ in the original paper), and $U$ is the *discrepancy*.
+The historical observations $Z$ are noisy, incomplete measurements of the real world climate, represented through the incidence matrix $H$ and zero-mean, independent measurement error $W$:
 
 \begin{equation}
 Z = H Y + W
 \end{equation}
 
-How should we model this data?
-
-**common mean** 
-
-- highly constrained by the model runs, could just use the ensemble mean
-- but want to integrate this into the inference with INLA
-- model as a non-stationary random process with temporal correlation
-- random walk with constant variance of increments 
+The challenge is to model the random components $M$, $R$, and $U$.
 
 
-**residuals**
-
-- constant offset
-- AR1 process
-- random walk drift
-
-**discrepancy**
-
-- will assume that $var(U) = var(R)$ and $E(U) = 0$
-- observations are exchangeable with model runs
-
-### R-INLA
+For simplicity I will make a very strong assumptions, namely that real climate is exchangeable with model climates.
+This implies that $E[U] = 0$ and $var(U) = var(R)$.
+In that case $U$ and $R$ are independent samples from the same distribution, and with the additional choice $A = 1$, $Y$ behaves statistically just like the $X_i$.
 
 
-```{r gmst-inla}
+With 35 model runs, the common mean component $M$ can be estimated with high precision.
+I will model $M$ simply by a random walk 
+
+\begin{equation}
+M_{t+1} = M_t + \Delta_t
+\end{equation}
+
+with constant, but unknown variance of the increments $var(\Delta_t)$.
+
+The individual residuals $R_i$ will be modeled as the sum of three random terms:
+
+- a systematic bias term, constant over time, different for each model
+- a stationary AR1 process, to account for internal variability around the common mean which exhibits auto-correlation
+- a non-stationary random walk with small variance of the increments, to account for the fact that model climates can drift away slowly from the common mean.
+
+
+\begin{equation}
+R_{i,t} = B_i + U_{i,t} + V_{i,t} 
+\end{equation}
+
+where
+
+\begin{align}
+U_{i,t+1} & = \alpha U_{i,t} + \sigma \epsilon_{i,t} \newline
+V_{i,t+1} & = V_{i,t} + \tau \epsilon'_{i,t}
+\end{align}
+
+
+
+## R-INLA
+
+We want to use INLA to decompose the data into a common mean and independent residuals.
+A crucial feature is the `replicate` option in INLAs `f()` function for which the package documentation currently says
+
+> replicate: We need to write documentation here
+
+There is a [short paragraph at r-inla.org](http://www.r-inla.org/models/tools#TOC-Replicate-a-model) on how `replicate` is used.
+If you specify, say, an AR1 model by `f(i, model='ar1', ...)` and provide `i = c(1,2,3,1,2,3)` in your data, INLA will assume that the first triplet of data values and the second triplet of data values depend on the exact same realisation of the latent AR1 process.
+If you additionally set `replicate = c(1,1,1,2,2,2)` in the model definition, INLA will model the first and second triplet as 2 independent realisations of the latent AR1 process.
+We make use of this feature when distinguishing between common and individual terms in the model definition.
+We have to set the correct indices `i` and correct values for `replicate`.
+
+```{r gmst-inla-formula}
 inla_formula = gmst ~ 
                  -1 + 
                  f(i1, model='rw1') +                  
@@ -155,7 +204,11 @@ inla_formula = gmst ~
                  f(i3, model='ar1', replicate=repl) + 
                  f(i4, model='rw1', replicate=repl, 
                        prior='loggamma', param=c(25, .25))
+```
 
+where `i1` to `i4` and `repl` are defined in the data specification:
+
+```{r gmst-inla-data}
 inla_data = 
   gmst_mod_sim %>%
   bind_rows(
@@ -163,17 +216,42 @@ inla_data =
     bind_rows(data_frame(year=2018:2100, gmst=NA_real_)) %>%
     mutate(model = 'obs')
   ) %>%
-  mutate(model = as.factor(model)) %>%
   mutate(i1 = year) %>%
   mutate(i2 = 1L) %>%
   mutate(i3 = year) %>%
   mutate(i4 = year) %>%
-  mutate(repl = as.integer(model))
+  mutate(repl = as.integer(as.factor(model)))
+
+print(inla_data)
+```
+
+The first `bind_rows` directive adds `NA`s to the observations for the years 2018-2100. 
+These are interpreted as missing values so INLA will fill them in, which will be used as our temperature predictions.
+Then we append the observed temperatures to the simulated temperatures.
+Then we specify the time indices `i1` to `i4` as documented below.
+We set `repl = as.integer(as.factor(model))`, so each model is assigned a unique, constant number.
+Using `replicate = repl`, each model will be treated as an independent realisation of the respective process.
+
+Our INLA formula has the following components:
+
+- `f(i1)`: Random walk process, indices are `1:n` for each model (and for the observations). No replication is set, i.e. each model and the observation sees the same realisation of the random walk process. This is the common mean $M$.
+- `f(i2)`: iid process. The time indices are constant, but each model sees an independent realisation because `replicate` is set. This is the model specific constant offset $B_i$.
+- `f(i3)`: AR1 process, with time indices `1:n` for each model, with `replicate` set. Each model sees an independent realisation of an AR1 process with the same parameters.
+- `f(i4)`: As for `i3`, but using a random walk process. This models non-stationary behavior of the residuals due to model simulations "drifting away" from the common mean. 
+
+I found that when using the default prior specifications for the random walk process `f(i4)` I got error messages due to stability issues, possibly because the "common random walk plus individual random walk" model is not identifiable.
+I therefore put a $Gamma(25, .25)$ prior on the random walk precision (specified in INLA as loggamma prior on log-precision), which encodes my prior belief that the "drift" of the residuals is not going to be massive. 
+I don't expect the temperature residuals to drift much more than 1 degree per century.
+The $Gamma(25, .25)$ prior on the random walk precision translates into a prior on the 100-year variance of the random walk process with mode at one and mass concentrated between .5 and 1.5:
+
+```{r plot-rw-variance-prior, fig.height=3}
+df = data_frame(sigma2 = 100 * 1 / rgamma(1e4, shape=25, rate=.25))
+ggplot(df) + geom_density(aes(x=sigma2))
 ```
 
 
 We can now fire up INLA.
-We tell INLA that our observations are "perfect" via `family='gaussian'` with very high precision. 
+We tell INLA that our observations are "perfect" via `family='gaussian'` and using a very high precision. 
 We also set `config=TRUE` to be able to simulate from the posterior later on.
 
 ```{r run-inla, cache=TRUE}
@@ -182,7 +260,7 @@ inla_result = inla(formula=inla_formula, data=inla_data, family='gaussian',
               control.compute=list(config=TRUE))
 ```
 
-The code takes about a minute to run on my laptop, so in this case INLA does not feel as lightning fast as it is sometimes advertised.
+The code takes about a minute to run on my laptop, so for this problem INLA does not feel as lightning fast as it is often advertised.
 On the other hand, inferring this model using MCMC would probably take hours.
 
 Now we sample from the posteriors, using the function `inla.posterior.sample()`.
@@ -209,18 +287,18 @@ inla_sampls[[1]][['latent']] %>% rownames %>% grep(x=., 'Predictor', value=TRUE)
 Since 8640 is the length of the model plus observation data frame, I am guessing that the predictors map to the rows of the `inla_data` data frame.
 So we have to find those predictors that correspond to `model == obs`.
 This is what the following chunk of code does.
-The output of `inla.sample.posterior` is not "tidy", so there is a bit of data wrangling necessary.
+The output of `inla.sample.posterior` is not ["tidy"](https://cran.r-project.org/web/packages/tidyr/vignettes/tidy-data.html), so there is a bit of data wrangling necessary.
 
 
 ```{r extract-obs}
 obs_inds = paste('Predictor:', which(inla_data$model == 'obs'), sep='')
 obs_sampls = 
-  inla_sampls %>% # inla_sampls is a list of length 'number of samples'
-    map('latent') %>% # extract latents
-    map(drop) %>%  # 1 column matrix to vector
+  inla_sampls %>%          # inla_sampls is a list of length 'number of samples'
+    map('latent') %>%      # extract latents
+    map(drop) %>%          # 1 column matrix to vector
     map(`[`, obs_inds) %>% # extract correct indices
     map(setNames, nm=levels(as.factor(inla_data$year))) %>% # set names to year
-    map_df(enframe, .id='sample', name='year') %>% # to long data frame 
+    map_df(enframe, .id='sample', name='year') %>%          # to long data frame 
     mutate_if(is.character, as.integer) %>%
     rename(gmst = value)
 ```
@@ -234,6 +312,8 @@ ggplot() +
   theme(legend.position = 'none') +
   ggtitle('ARTIFICIAL DATA')
 ```
+
+Let's also plot the posterior mean plus/minus 2 posterior standard deviations:
 
 ```{r plot-posterior-mean-variance, fig.height=5}
 post_df = obs_sampls %>%
@@ -251,8 +331,25 @@ ggplot(data=post_df, aes(x=year)) +
   ggtitle('ARTIFICIAL DATA')
 ```
 
+All this looks rather well.
+However, on closer inspection, something doesn't seem quite right with the sampling algorithm.
+There are a couple of "bundles" of posterior predictive samples, which indicates that the sampler doesn't produce independent posterior samples.
+Below I zoomed in on a region of the posterior predictive samples where the issue is particularly obvious:
 
-# The real world
+
+```{r plot-inla-projection-bundles, fig.height=5}
+ggplot() +
+  geom_line(data=gmst_mod_sim, aes(x=year, y=gmst, color=model), na.rm=TRUE) +
+  geom_line(data=obs_sampls, aes(x=year, y=gmst, group=sample), color='black', na.rm=TRUE) +
+  coord_cartesian(xlim=c(2075, 2100), ylim=c(15.5, 16.3)) +
+  theme(legend.position = 'none') + labs(x=NULL, y=NULL)
+```
+
+I will ignore this issue for now, but it is certainly important and worthwhile looking into.
+It might be possible to solve this by setting some parameters to control the sampler.
+
+
+## The real world
 
 I have applied the same analysis to the actual CMIP5 data and produced equivalent plots.
 
@@ -313,6 +410,24 @@ ggplot(data=post_df, aes(x=year)) +
   labs(x=NULL, y='Global mean temperature [C]') +
   ggtitle('CMIP5 simulations (RCP4.5), HadCRUT4 observations')
 ```
+
+According to this analysis, we should expect an increase in global mean temperatures from pre-industrial $\approx 13.5$, currently $\approx 14.5$, to roughly between $15$ and almost $17$ degrees by the end of the century.
+This is a warming of $1-3$ degrees compared to the commonly used reference period 1961-1990.
+Remember that this is assuming that emission scenario RCP4.5 is the correct one.
+This result is in line with the well-known global temperature projections published for example in the [IPCC summary for policymakers (Table SPM.2)](http://www.ipcc.ch/pdf/assessment-report/ar5/wg1/WG1AR5_SPM_FINAL.pdf).
+
+
+## Conclusion
+
+INLA provides a flexible modelling framework for modelling time series data.
+We used INLA to model a collection of exchangeable model simulations of global mean surface temperature.
+By treating the real-world observations as a partly observed realisation from the same exchangeable collection, we were able to predict the future by making INLA fill in the missing future values.
+However, the sampling algorithm used by INLA seems suboptimal, as it doesn't produce independent posterior samples.
+
+As an extension we could think about explicitly modelling the discrepancy between observations and ensemble mean by specifying, say, an additional random walk `f(i5, model='rw1')` where `i5` is `NA` for models and `1:n` for the observations.
+I should also include information about observational uncertainty, which is available in the HadCRUT4 archive.
+
+
 
 
 
