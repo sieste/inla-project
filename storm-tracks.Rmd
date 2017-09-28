@@ -161,12 +161,12 @@ ggplot(data=df, aes(x=x, y=y, color=parameter)) + geom_line() + coord_cartesian(
 ```
 
 
-## Inferring common and individual components
+## Decomposing spatial fields into common and individual components
 
 ```{r}
 inla_formula = tden ~ -1 + 
   f(i_rw_common, model='rw2d', nrow=nlat, ncol=nlon) +
-  f(i_bias, model='iid', replicate=repl) +
+  f(i_bias, model='iid') +
   f(i_rw_indiv, model='rw2d', nrow=nlat, ncol=nlon, replicate=repl)
 ```
  
@@ -192,18 +192,171 @@ inla_out = inla(formula=inla_formula, data=inla_data)
 lonlat = inla_data %>% 
   filter(repl == 1) %>%
   select(lon, lat)
-df = bind_cols(
-  lonlat,
-  inla_out$summary.random$i_rw_common %>% as_data_frame
-) %>% 
-select(lon, lat, mean)
+
 ```
 
+## The common mean
+
 ```{r plot-common-mean-postmean, fig.height=5}
-ggplot(data=df) + 
+df_common = 
+  bind_cols(
+    lonlat,
+    inla_out$summary.random$i_rw_common %>% as_data_frame
+  ) %>% 
+  select(lon, lat, mean)
+ggplot(data=df_common) + 
   geom_tile(mapping=aes(x=lon, y=lat, fill=mean)) + 
   scale_fill_viridis() + 
   coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
   geom_path(data=coast, aes(x=long, y=lat, group=group), col='white') +
   labs(fill = NULL)
 ```
+
+## The individual biases
+
+```{r plot-bias-postmean, fig.width=10, fig.height=3}
+df_bias = 
+  inla_out$summary.random$i_bias %>% as_data_frame %>% 
+  select(ID, mean) %>%    # extract ID and mean
+  mutate(lon=0, lat=0) %>%
+  rename(repl = ID) %>% mutate(repl = str_c('bias_', repl))
+ggplot(data=df_bias) + 
+  geom_tile(aes(x=lon, y=lat, width=180, height=180, fill=mean)) + 
+  scale_fill_viridis() + 
+  facet_wrap(~ repl, nrow=1) +
+  coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
+```
+
+## The individual residuals
+
+```{r plot-individuals-postmean, fig.width=10, fig.height=3}
+df_resid = 
+  inla_out$summary.random$i_rw_indiv %>% as_data_frame %>% 
+  select(ID, mean) %>%    # extract ID and mean
+  group_by(ID) %>%        # create groups of 5 for each ID
+  mutate(repl=str_c('resid_', 1:n())) %>%  # add replication index 1:size_of_group
+  nest %>%                # put each group into a data frame
+  bind_cols(lonlat) %>%   # bin lonlat data frame
+  unnest(data)            # expand nested data frames again
+ggplot(df_resid) + 
+  geom_tile(aes(x=lon, y=lat, fill=mean)) + 
+  scale_fill_viridis() + 
+  facet_wrap(~ repl, nrow=1) +
+  coord_cartesian(xlim=range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
+```
+
+
+# Combining past and future
+
+Assumptions, partly based on belief about the physics, partly just to simplify the inference: 
+
+- biases persist into the future
+- future common mean does not depend on past common mean 
+- all residuals are realisations of the same random process
+
+
+```{r}
+nlon = select(storms, lon) %>% unique %>% nrow
+nlat = select(storms, lat) %>% unique %>% nrow
+n = nlon * nlat
+m = storms %>% select(model) %>% unique %>% nrow
+
+inla_formula = tden ~ -1 +
+  f(i_rw_common, model='rw2d', nrow=nlat, ncol=nlon, replicate=repl_rw_common) +
+  f(i_bias, model='iid', replicate=repl_bias) +
+  f(i_rw_indiv, model='rw2d', nrow=nlat, ncol=nlon, replicate=repl_rw_indiv)
+
+
+inla_data = storms %>% 
+  # add unobserved future observations as NAs
+  bind_rows(
+    storms %>% 
+    filter(model == 'obs', experiment == 'historical') %>%
+    mutate(experiment = factor('future', levels=levels(storms$experiment))) %>%
+    mutate(tden = NA_real_)
+  ) %>%
+  # add common mean time and replication indices
+  group_by(experiment, model) %>% mutate(i_rw_common = 1:n) %>% ungroup %>%
+  mutate(repl_rw_common = as.integer(experiment)) %>%
+  # add bias time and replication indices
+  mutate(i_bias = 1) %>%
+  group_by(model) %>% do(bind_cols(., repl_bias = as.integer(.$model))) %>% ungroup %>%
+  # add residuals time and replication index
+  group_by(experiment, model) %>% mutate(i_rw_indiv = 1:n) %>% ungroup %>%
+  mutate(repl_rw_indiv = as.integer(as.factor(str_c(model, experiment))))
+```
+
+```{r inla-future-obs, cache=TRUE}
+  inla_out = inla(formula=inla_formula, data=inla_data, control.predictor=list(compute=TRUE, link=1))
+```
+
+
+## The posterior predictive standard deviation looks dubious
+
+```{r plot-futureobs-postmean}
+inds = with(inla_data, which(experiment == 'future' & model == 'obs'))
+pred_row_names = str_c('fitted.Predictor.', str_pad(inds, width=4, side='left', pad='0'))
+df_pred = 
+  inla_data %>% 
+  filter(experiment == 'future', model == 'obs') %>%
+  bind_cols(inla_out$summary.fitted.values[pred_row_names, ]) %>%
+  select(lat, lon, mean, sd) %>%
+  gather(key='posterior', value='value', mean, sd) 
+ggplot(df_pred %>% filter(posterior == 'mean')) + 
+  geom_tile(aes(x=lon, y=lat, fill=value)) + 
+  scale_fill_viridis() + 
+  coord_cartesian(xlim=range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
+ggplot(df_pred %>% filter(posterior == 'sd')) + 
+  geom_tile(aes(x=lon, y=lat, fill=value)) + 
+  scale_fill_viridis() + 
+  coord_cartesian(xlim=range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
+```
+
+This looks like I mixed up lats and lons somewhere or something like this, but I haven't found a bug yet. 
+Could this also be an artifact of the 2d random walk model? 
+Will have to look into this more.
+
+
+## Filling in the missing panel
+
+The posterior predictive mean for the future observation above is on a different scale.
+Below I produce the same plot as in the beginning, but with the "future obs" panel filled with the posterior predictive mean.
+
+```{r plot-futureobs-filledin, fig.height=4}
+df_ppmean_obs = 
+  inla_data %>%
+  filter(model == 'obs') %>%
+  mutate(tden = ifelse(experiment == 'future', 
+                       inla_out$summary.fitted.values[pred_row_names, 'mean'],
+                       tden))
+ggplot(df_ppmean_obs) + 
+  geom_tile(aes(x=lon, y=lat, fill=tden)) + 
+  facet_wrap( ~ experiment) + 
+  scale_fill_viridis() + 
+  coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white') +
+  labs(fill = 'storm\ntrack\ndensity')
+```
+
+
+## Difference between historical observations and the posterior predictive mean
+
+```{r plot-futureobs-diff, fig.height=4}
+df_diff = 
+  df_ppmean_obs %>%
+  select(lat, lon, experiment, tden) %>%
+  spread(key=experiment, value=tden) %>%
+  mutate(diff = historical - future)
+ggplot(df_diff) + 
+  geom_tile(aes(x=lon, y=lat, fill=diff)) + 
+  scale_fill_viridis() + 
+  coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
+```
+
+
+
