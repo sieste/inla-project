@@ -5,88 +5,55 @@ date: September 2017
 layout: default
 ---
 
+
+
+
 # Strom track density
+
+
+## Libraries, preliminaries
+
+I will use pipes, tibbles and other goodness from the `tidyverse`, coastline data from `rnaturalearth`, the `viridis` color scheme, and `INLA` for statistical inference:
 
 
 ```r
 suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(stringr))
+suppressPackageStartupMessages(library(viridis))
 suppressPackageStartupMessages(library(INLA))
-library(viridis)
-```
-
-```
-## Loading required package: viridisLite
-```
-
-```r
-library(rnaturalearth)
-library(stringr)
-knitr::opts_chunk$set(
-  cache.path='_knitr_cache/storm-tracks/',
-  fig.path='figure/storm-tracks/'
-)
+coast = rnaturalearth::ne_coastline(scale=110) %>% fortify %>% as_data_frame
 ```
 
 
 
 
-To plot maps, we use coastlines from the `rnaturalearth` data set:
 
 
-```r
-coast = ne_coastline(scale=110) %>% fortify %>% as_data_frame
-```
+## The data
 
-The data we are looking at are spatial fields of storm track density (number of storms that pass through an area).
-We have data from 4 climate models that have simulated past and future climate.
-We also have historical observation data.
-The area we are looking at is (roughly) Europe and the season is winter (DJF).
+The data we are looking at are spatial fields of storm track density (number of storms that pass through an area per season).
+All the data is stored in a "tidy" data frame called `storms`, the track density variable is called `tden`:
 
 
 ```r
 load('data/storm-track-density.Rdata')
-storms
+storms %>% print(n=3)
 ```
 
 ```
 ## # A tibble: 4,320 x 5
-##         lat        lon   model experiment     tden
-##       <dbl>      <dbl>  <fctr>     <fctr>    <dbl>
-##  1 36.47029 -14.161041 model_1 historical 4.460165
-##  2 36.47029 -11.645844 model_1 historical 4.388444
-##  3 36.47029  -9.130646 model_1 historical 4.148048
-##  4 36.47029  -6.615448 model_1 historical 3.544464
-##  5 36.47029  -4.100250 model_1 historical 3.052784
-##  6 36.47029  -1.585052 model_1 historical 2.820646
-##  7 36.47029   1.257596 model_1 historical 3.032609
-##  8 36.47029   3.772789 model_1 historical 3.530901
-##  9 36.47029   6.287981 model_1 historical 4.269177
-## 10 36.47029   8.803174 model_1 historical 5.247809
-## # ... with 4,310 more rows
+##        lat       lon   model experiment      tden
+##      <dbl>     <dbl>  <fctr>     <fctr>     <dbl>
+## 1 36.47029 -14.16104 model_1 historical  4.460165
+## 2 38.98548 -14.16104 model_1 historical  7.017774
+## 3 41.50068 -14.16104 model_1 historical 10.581059
+## # ... with 4,317 more rows
 ```
 
-
-```r
-summary(storms)
-```
-
-```
-##       lat             lon              model          experiment  
-##  Min.   :36.47   Min.   :-14.161   model_1:960   historical:2400  
-##  1st Qu.:45.90   1st Qu.:  3.773   model_2:960   future    :1920  
-##  Median :55.33   Median : 22.637   model_3:960                    
-##  Mean   :55.33   Mean   : 22.571   model_4:960                    
-##  3rd Qu.:64.77   3rd Qu.: 41.501   obs    :480                    
-##  Max.   :74.20   Max.   : 59.107                                  
-##       tden        
-##  Min.   : 0.2943  
-##  1st Qu.: 6.9245  
-##  Median : 8.9311  
-##  Mean   : 8.6013  
-##  3rd Qu.:10.5322  
-##  Max.   :19.6039
-```
-
+We have data from 4 climate models that have simulated past and future storms.
+We also have historical observation data.
+The area we are looking at is (roughly) Europe and the season is winter (DJF).
+The data looks like this:
 
 
 ```r
@@ -95,21 +62,33 @@ ggplot(data=storms) +
   facet_grid(model ~ experiment) + 
   scale_fill_viridis() + 
   coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
-  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white') +
-  labs(fill = 'storm\ntrack\ndensity')
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
 ```
 
 ![plot of chunk plot-track-density](figure/storm-tracks/plot-track-density-1.png)
 
-The ultimate goal is to use all the model data and the observations to fill in the blank field for the future observations, calculating both a best guess estimate as well as uncertainty information.
+## The problem
 
+Changes in storm activity over Europe under climate change is obviously of interest to a range of stakeholders, policy-makers, and the public in general.
+So we want to use all the above data to say something about the expected future storm track density over the region of interest, as well as the associated uncertainty.
+
+
+We don't expect future climate to be much different from past climate, so the historical observations will certainly be informative about future climate.
+The climate model output includes much of our physical understanding about the climate system, as well as a likely scenario about future greenhouse gas emissions, which have an impact on the physical boundary conditions that drive the climate system.
+So we will want to consider climate model output as well.
+The existence of multiple climate models from different research centers, and the fact that they don't agree on future climate tells something about the imperfections in the models, which we will want to account for.
+
+Our goal is to use all the model data and the observations in a coherent statistical framework to fill in the blank field in the plot above, the one for the future observations, calculating both a best guess estimate as well as the associated uncertainty.
+
+This will involve a fair bit of spatial statistical modelling, for which we will use the R package `INLA` (the name R-INLA is also used), which implements the Integrated Nested Laplace Approximation methodology.
 
 
 ## Smoothing a spatial field with R-INLA
 
-As a preliminary, we will use R-INLA decompose a single spatial field into a smooth field represented by a 2-dimensional random walk, and a random component represented by independent Gaussian noise.
+As a preliminary, we will use R-INLA to decompose a single spatial field into a smooth and a random component.
+Here we will model the spatial correlation of the smooth component by a 2-dimensional random walk, and the random component by independent Gaussian noise.
 
-The 2d random walk is a generalisation of the 1d random walk, where the value $x_{i,j}$ at the gridpoint $(i,j)$ is given by the average of its nearest neighbours plus independent Normal noise with zero mean and precision $\tau$, i.e.
+The 2d random walk is a generalisation of the 1d random walk, where the value $x_{i,j}$ at the gridpoint $(i,j)$ is given by a weighted average of its nearest neighbours plus independent Normal noise with zero mean and precision $\tau$, i.e.
 
 \begin{equation}
 (x_{i+1,j} + x_{i-1,j} + x_{i,j+1} + x_{x,j-1}) - 4x_{i,j} \sim N(0, \tau^{-1})
@@ -118,15 +97,18 @@ The 2d random walk is a generalisation of the 1d random walk, where the value $x
 The precision parameter $\tau$ acts as a smoothness parameter.
 The higher $\tau$, the less will $x_{i,j}$ differ from the average over its neighbors, and thus the smoother will be the 2d field. 
 
-In R-INLA, the [2d random walk model](http://www.math.ntnu.no/inla/r-inla.org/doc/latent/rw2d-model.pdf) is specified as follows:
+In R-INLA, the [2d random walk model](http://www.math.ntnu.no/inla/r-inla.org/doc/latent/rw2d-model.pdf) is paramtrised differently, using not only 4, but 12 nearest neighbors, with positive and negative weights. 
+To fix the log-precision at a value of 1 the `rw2d` model is specified as follows:
 
 
 ```r
 nlon = select(storms, lon) %>% unique %>% nrow
 nlat = select(storms, lat) %>% unique %>% nrow
+logtau = 1
 
-inla_formula = tden ~ 1 + 
-  f(point, model='rw2d', nrow=nlat, ncol=nlon)
+inla_formula = tden ~ 1 +
+  f(point, model='rw2d', nrow=nlat, ncol=nlon, 
+    hyper=list(theta=list(initial=logtau, fixed=TRUE)))
 ```
 
 The 2d random walk model in INLA only applies to data on a rectangular grid.
@@ -164,24 +146,49 @@ ggplot(data=df) +
   facet_wrap(~ key) + 
   scale_fill_viridis() + 
   coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
-  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white') +
-  labs(fill = 'storm\ntrack\ndensity')
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
 ```
 
 ![plot of chunk plot-rw2d-smooth](figure/storm-tracks/plot-rw2d-smooth-1.png)
 
 The fitted values are smoother than the original.
-It is possible to specify a fixed value for the precision parameter of the random walk to control the smoothness.
-Here the precisions of the 2d random walk and the Gaussian residuals were both estimated by INLA; here are their posteriors:
-
+If we change the precision value of the random walk, we can play with the smoothness:
 
 
 ```r
-df = inla_out$marginals.hyperpar %>% map(as_data_frame) %>% bind_rows(.id='parameter')
-ggplot(data=df, aes(x=x, y=y, color=parameter)) + geom_line() + coord_cartesian(xlim=c(0, 2.5))
+rw_df = inla_data %>% 
+  select(lon, lat, tden) %>%
+  mutate(smooth = 'original')
+
+for (logtau in c(0.5,1,3)) {
+
+  inla_formula = tden ~ 1 +
+    f(point, model='rw2d', nrow=nlat, ncol=nlon, 
+      hyper=list(theta=list(initial=logtau, fixed=TRUE)))
+
+  inla_out = inla(formula=inla_formula, data=inla_data, 
+                  control.predictor=list(compute=TRUE, link=1))
+
+  out_df = inla_data %>% select(lon, lat) %>% 
+    mutate(tden = inla_out$summary.fitted.values$mean) %>%
+    mutate(smooth = str_c('logtau=', logtau))
+
+  rw_df = bind_rows(rw_df, out_df)
+
+}
 ```
 
-![plot of chunk plot-rw2d-smooth-hyper](figure/storm-tracks/plot-rw2d-smooth-hyper-1.png)
+
+```r
+ggplot(data=rw_df) + 
+  geom_tile(mapping=aes(x=lon, y=lat, fill=tden)) + 
+  facet_wrap(~ smooth, nrow=1) + 
+  scale_fill_viridis() + 
+  coord_cartesian(xlim = range(storms$lon), ylim=range(storms$lat)) +
+  geom_path(data=coast, aes(x=long, y=lat, group=group), col='white')
+```
+
+![plot of chunk plot-rw2d-smooth-loop](figure/storm-tracks/plot-rw2d-smooth-loop-1.png)
 
 
 ## Decomposing spatial fields into common and individual components
@@ -264,6 +271,8 @@ ggplot(data=df_bias) +
 
 ![plot of chunk plot-bias-postmean](figure/storm-tracks/plot-bias-postmean-1.png)
 
+The posterior standard deviation on all the bias terms is very small, order of 0.001.
+
 ## The individual residuals
 
 
@@ -334,9 +343,6 @@ inla_data = storms %>%
 ```
 
 
-## The posterior predictive standard deviation looks dubious
-
-
 ```r
 inds = with(inla_data, which(experiment == 'future' & model == 'obs'))
 pred_row_names = str_c('fitted.Predictor.', str_pad(inds, width=4, side='left', pad='0'))
@@ -365,10 +371,6 @@ ggplot(df_pred %>% filter(posterior == 'sd')) +
 
 ![plot of chunk plot-futureobs-postmean](figure/storm-tracks/plot-futureobs-postmean-2.png)
 
-This looks like I mixed up lats and lons somewhere or something like this, but I haven't found a bug yet. 
-Could this also be an artifact of the 2d random walk model? 
-Will have to look into this more.
-
 
 ## Filling in the missing panel
 
@@ -395,7 +397,7 @@ ggplot(df_ppmean_obs) +
 ![plot of chunk plot-futureobs-filledin](figure/storm-tracks/plot-futureobs-filledin-1.png)
 
 
-## Difference between historical observations and the posterior predictive mean
+## Difference between the posterior predictive mean and the historical observations
 
 
 ```r
@@ -403,7 +405,7 @@ df_diff =
   df_ppmean_obs %>%
   select(lat, lon, experiment, tden) %>%
   spread(key=experiment, value=tden) %>%
-  mutate(diff = historical - future)
+  mutate(diff = future - historical)
 ggplot(df_diff) + 
   geom_tile(aes(x=lon, y=lat, fill=diff)) + 
   scale_fill_viridis() + 
