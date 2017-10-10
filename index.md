@@ -16,5 +16,8 @@ This is a collection of small research reports I produced during a 3 month proje
 
 - [**Storm track density analysis**](storm-tracks): *work in progress*
 
+- [**Linear regression on a spatial grid**](grid-regression): coming soon
+
+- [**INLA lecture**](inla-lecture)
 
 
