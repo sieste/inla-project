@@ -5,6 +5,19 @@ date: October 2017
 layout: default
 ---
 
+# Linear regression on a spatial grid
+
+We address a commonly encountered problem in weather and climate forecasting:
+A data set of past atmospheric model forecasts and corresponding observations is available for a few years and many grid points.
+We want to use this data set to learn something about systematic errors of the forecast model, and how to correct them for future forecasts.
+Correcting systematic forecast errors is often done by fitting a linear regression model to the observations, that uses the model forecast as a predictor.
+We expect systematic errors to be different for different locations, so in principle we should fit a regression model separately at each grid point. 
+But then atmospheric data is smooth, so we would also expect the regression parameters to vary smoothly in space.
+
+In this note I develop a method to efficiently fit linear regression models to gridded data, while accounting for spatial smoothness of the parameter estimates.
+The method results in improved out-of-sample performance of the regression model.
+
+
 ```{r}
 suppressPackageStartupMessages(library(rnaturalearth))
 suppressPackageStartupMessages(library(maps))
@@ -127,7 +140,39 @@ The latent field $x$ thus has distribution
 
 and so $x$ is a GMRF with precision matrix given by the block-diagonal matrix $Q = diag(Q_\alpha, Q_\beta, Q_\tau)$. 
 
-The precision matrix will be specified next.
+The precision matrix will be specified below, but first we look at the standard method of fitting individual regression models, ignoring spatial dependency.
+
+## Linear regression without spatial dependency
+
+We fit a linear regression model to each grid point individually without considering any smoothness of the regression parameters over neighboring grid points.
+We simply use `lm` to fit linear models at each grid point:
+
+
+```{r standard-lm}
+# fit linear models
+t2m_lm = t2m %>% nest(-c(s,lat,lon)) %>%
+  mutate(fit = purrr::map(data, ~ lm(obs ~ fcst, data=.)))
+
+# extract residuals and fitted values
+t2m_lm_fit = 
+  t2m_lm %>%
+  mutate(fit = purrr::map(fit, fortify)) %>%
+  unnest(fit, data) %>%
+  select(-c(.sigma, .cooksd, .stdresid)) %>%
+  mutate(resid_loo = .resid / (1 - .hat)) %>%
+  rename(resid = .resid, 
+         fitted=.fitted) 
+
+# calculate mean squared errors of raw forecasts and fitted values
+t2m_lm_mse = t2m_lm_fit %>% 
+  summarise(mse = mean(resid^2),
+            mse_loo = mean(resid_loo^2))
+
+# output
+t2m_lm_mse %>% knitr::kable()
+```
+
+
 
 
 ## Spatial dependency
@@ -208,6 +253,34 @@ Since $f(x)$ is proportional to $\log p(x \vert y, \theta)$, the second order ap
 
 **Laplace approximation**: $p(x \vert y, \theta)$ is approximated by a Gaussian with mean equal to the mode of $f(x)$ (which is found numerically), and precision matrix given by the negative Hessian of $f(x)$ evaluated at the mode. 
 
+The **gradient** of $f(x)$ is a vector of length $3 N_s$, comprised of the three gradient vectors $(\partial_\alpha f, \partial_\beta f, \partial_\tau f)$, given by
+
+\begin{align}
+\frac{\partial f}{\partial \alpha} & = -Q_\alpha \alpha + vec_s\left[ e^{-\tau_s}  \sum_t (y_{s,t}-\alpha_s-\beta_s f_{s,t}) \right]\newline
+\frac{\partial f}{\partial \beta} & = -Q_\beta \beta + vec_s\left[ e^{-\tau_s}  \sum_t f_{s,t}(y_{s,t}-\alpha_s-\beta_s f_{s,t}) \right]\newline
+\frac{\partial f}{\partial \tau} & = -Q_\tau \tau + vec_s\left[ \frac12 e^{-\tau_s}  \sum_t (y_{s,t}-\alpha_s-\beta_s f_{s,t})^2 -\frac{N_t}{2} \right]
+\end{align}
+
+The **Hessian** of $f(x)$ is the block matrix
+
+\begin{equation}
+Hf(x) = \left(\begin{matrix} 
+  H_{\alpha\alpha}-Q_\alpha & H_{\alpha\beta} & H_{\alpha\tau}\newline
+  H_{\alpha\beta} & H_{\beta\beta} -Q_\beta& H_{\beta\tau}\newline
+  H_{\alpha\tau} & H_{\beta\tau} & H_{\tau\tau} -Q_\tau
+\end{matrix}\right)
+\end{equation}
+
+with diagonal matrices of second derivatives given by
+
+\begin{align}
+H_{\alpha\alpha} & = diag_s \left[ - N_t e^{-\tau_s}  \right] \newline
+H_{\alpha\beta} & = diag_s \left[ - e^{-\tau_s} \sum_t f_{s,t} \right] \newline
+H_{\alpha\tau} & = diag_s \left[ -e^{-\tau_s} \sum_t (y_{s,t} - \alpha_s - \beta_s f_{s,t}) \right] \newline
+H_{\beta\beta} & = diag_s \left[ -e^{-\tau_s} \sum_t f_{s,t}^2 \right] \newline
+H_{\beta\tau} & = diag_s \left[ -e^{-\tau_s} \sum_t f_{s,t} (y_{s,t} - \alpha_s - \beta_s f_{s,t}) \right] \newline
+H_{\tau\tau} & = diag_s \left[ -\frac12 e^{-\tau_s} \sum_t (y_{s,t} - \alpha_s - \beta_s f_{s,t})^2 \right] 
+\end{align}
 
 The function `calc_f` below returns a list with the value of $f$, the gradient $grad f$ and the Hessian matrix $Hf$ at a given value of $x$:
 
@@ -332,42 +405,6 @@ df_out
 ```
 
 
-## Linear regression without spatial dependency
-
-We have estimated the posterior mode of $x$ given the observed values of $y$ and setting $\sigma^2 = 0.1$.
-For later comparison, we also fit a linear regression model to each grid point individually without considering any smoothness of the regression parameters over neighboring grid points.
-We simply use `lm` to fit linear models at each grid point:
-
-
-```{r standard-lm}
-# fit linear models
-t2m_lm = t2m %>% nest(-c(s,lat,lon)) %>%
-  mutate(fit = purrr::map(data, ~ lm(obs ~ fcst, data=.)))
-
-# extract coefficients
-t2m_lm_coefs = t2m_lm %>%
-  mutate(alpha_hat = map_dbl(fit, ~ .$coefficients[1]),
-         beta_hat  = map_dbl(fit, ~ .$coefficients[2]),
-         sigma2_hat = map_dbl(fit, ~ sum(.$residuals^2) / .$df.residual)) %>%
-  select(-data, -fit)
-
-# extract residuals and fitted values
-t2m_lm_fit = 
-  t2m_lm %>%
-  mutate(fit = purrr::map(fit, fortify)) %>%
-  unnest(fit, data) %>%
-  select(-c(.sigma, .cooksd, .stdresid)) %>%
-  mutate(resid_loo = .resid / (1 - .hat)) %>%
-  rename(resid = .resid, fitted=.fitted) 
-
-# calculate mean squared errors at each grid point
-t2m_lm_mse =
-  t2m_lm_fit %>% group_by(s,lat,lon) %>%
-  summarise(mse = mean(resid^2),
-            mse_loo = mean(resid_loo^2)) %>%
-  semi_join(select(t2m_lm_fit, s,lat,lon), by='s')
-```
-
 
 
 ## Compare fitted parameters
@@ -383,10 +420,11 @@ df_pars_rw = df_out %>% filter(year==1) %>%
   mutate(type='rw')
 
 # extract parameter estimates from independent model
-df_pars_lm = t2m_lm_coefs %>% 
-  rename(alpha=alpha_hat, beta=beta_hat, sigma2 = sigma2_hat) %>%
-  mutate(tau = log(sigma2)) %>% select(-sigma2) %>%
-  mutate(type='lm')
+df_pars_lm = t2m_lm %>% 
+  mutate(alpha = map_dbl(fit, ~ .$coefficients[1]),
+         beta  = map_dbl(fit, ~ .$coefficients[2]),
+         tau = map_dbl(fit, ~ log(sum(.$residuals^2)) - log(.$df.residual)),
+         type='lm')
 
 # combine into one data frame, ignore alpha since it is zero for normalised
 # data
@@ -406,8 +444,8 @@ ggplot(df_pars) +
   scale_fill_viridis() 
 ```
 
-The smoothing of the regression parameters worked successfully.
-The estimated parameters are similar, but the field on the bottom is smoother because we have built spatial dependency into the model.
+The estimation and smoothing of the regression parameters seems to work.
+The estimated parameters are similar, but the fields on the bottom are smoother because we have built spatial dependency into the model.
 By varying the parameter `sigma2` in the function `calc_x0` higher or lower degrees of smoothing can be achieved.
 
 **TODO**: illustrate effect of different smoothing parameters
@@ -471,8 +509,13 @@ The improvement in mean squared error is close to $10\%$, which is substantial.
 This is encouraging. 
 Since we have not yet optimised (or integrated over) the smoothing parameter $\sigma^2$ of the 2d random walk model further improvements might be possible.
 
+
+
 **TODO:** 
-- explore $\sigma^2$ to estimate $p(\theta \vert y)$
+- compare posterior standard deviations of the spatial model with standard errors of regression parameters
+- explore $\sigma^2$ to estimate the posterior $p(\theta \vert y)$
 - integrate over $\sigma^2$ to estimate $p(x \vert y)$
+- consider different $\sigma^2$ for $\alpha$, $\beta$, and $\tau$
+- consider different spatial models
 
 
