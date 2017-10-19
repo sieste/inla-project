@@ -1,4 +1,4 @@
-.DEFAULT_GOAL := grid-regression
+.DEFAULT_GOAL := inla-lecture
 
 grid-regression: grid-regression.md
 inla-from-scratch: inla-from-scratch.md

@@ -221,14 +221,18 @@ image(Q_alpha[1:100, 1:100])
 
 ## Approximating $p(x \vert y, \theta)$ by the Laplace approximation
 
-We want to calculate the posterior distribution of all the regression parameters $\alpha$, $\beta$, $\tau$ collected in the latent field vector $x$, given the observed data $y$ and specific values of $\theta$. 
-To this end we have to normalise the joint distribution $p(y,x, \theta)$ with respect to $x$, i.e. we have to calculate the integral of $p(y,x,\theta)$ with respect to $x$, where $p(y,x,\theta)$ is given by
+In this section I outline how to calculate the mode of the conditional distribution $p(x \vert y, \theta)$ by an interative method, and how to approximate $p(x \vert y, \theta)$ by a Normal distribution.
+
+We want to calculate the posterior distribution of all the regression parameters $\alpha$, $\beta$, $\tau$ collected in the latent field vector $x$, for given values of the observed data $y$ and hyperparamters $\theta$. 
+To this end we have to normalise the joint distribution $p(y, x, \theta)$ with respect to $x$, i.e. we have to calculate the integral of $p(y,x,\theta)$ with respect to $x$, where $p(y,x,\theta)$ is given by
 
 
 \begin{align}
 \log p(y,x) & \propto \log p(y \vert x, \theta) + \log p(x \vert \theta) + \log p(\theta)\newline
 & \propto -\frac{N_t}{2} \sum_s \tau_s - \frac12 \sum_{s=1}^{N_s} \sum_{t=1}^{N_t} e^{-\tau_s} (y_{s,t} - \alpha_s - \beta_s f_{s,t})^2 + \frac12 \log\det Q - \frac12 x'Qx + \log p(\theta)
 \end{align}
+
+In general, this is not possible analytically, and we have to use an approximate methods.
 
 Note that the precision matrix $Q$ depends on the hyperparameter $\theta = \sigma^2$.
 Define the function $f(x)$ as being proportional to $\log p(y,x,\theta)$ at fixed values of $y$ and $\theta$:
