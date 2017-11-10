@@ -19,3 +19,7 @@ This is a collection of small research reports I produced during a 3 month proje
 - [**Linear regression on a spatial grid**](grid-regression): I show how a Laplace approximation can be used to fit linear regression models over a spatial grid, under the assumption that the fields of regression parameters are realisations of smooth spatial processes.
 
 
+## Misc
+
+- [**Problematic correlation of posterior predictive samples**](sampler-problem)
+
