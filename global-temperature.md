@@ -348,11 +348,12 @@ Below I zoomed in on a region of the posterior predictive samples where the issu
 ggplot() +
   geom_line(data=gmst_mod_sim, aes(x=year, y=gmst, color=model), na.rm=TRUE) +
   geom_line(data=obs_sampls, aes(x=year, y=gmst, group=sample), color='black', na.rm=TRUE) +
-  coord_cartesian(xlim=c(2075, 2100), ylim=c(15.5, 16.3)) +
+  coord_cartesian(xlim=c(2015, 2030), ylim=c(14.4, 15.0)) +
   theme(legend.position = 'none') + labs(x=NULL, y=NULL)
 ```
 
 ![plot of chunk plot-inla-projection-bundles](figure/global-temperature/plot-inla-projection-bundles-1.png)
+
 
 I will ignore this issue for now, but it is certainly important and worthwhile looking into.
 It might be possible to solve this by setting some parameters to control the sampler.
