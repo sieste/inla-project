@@ -100,3 +100,6 @@ ggplot(data=inla_sampls_noseed, aes(x=i, y=y, group=sample)) + geom_line(aes(col
 
 ![plot of chunk inla-rw1-noseed](figure/sampler-problem/inla-rw1-noseed-1.png)
 
+This looks much better.
+The high correlation is probably due to a bug with how the `seed` argument is used internally.
+
