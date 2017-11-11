@@ -86,4 +86,6 @@ ggplot(data=inla_sampls_noseed, aes(x=i, y=y, group=sample)) + geom_line(aes(col
   scale_colour_continuous(type='viridis') + coord_cartesian(xlim=c(90, n))
 ```
 
+This looks much better.
+The high correlation is probably due to a bug with how the `seed` argument is used internally.
 
