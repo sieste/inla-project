@@ -5,6 +5,16 @@ date: November 2017
 layout: default
 ---
 
+## Update:
+
+**The behavior described here is due to a bug in INLA which has been fixed in version 17.11.11.**
+
+(see the [thread](https://groups.google.com/forum/#!topic/r-inla-discussion-group/y7dAzbrXb6o) on the INLA discussion group)
+
+
+
+
+## Predicting a random walk
 
 
 
@@ -18,7 +28,35 @@ knitr::opts_chunk$set(
 )
 ```
 
-## Predicting a random walk
+
+```r
+inla.version()
+```
+
+```
+## 
+## 
+## 	INLA version ............: 17.06.20
+## 	INLA date ...............: Tue 20 Jun 12:36:50 JST 2017
+## 	INLA hgid ...............: Version_17.06.20
+## 	INLA-program hgid .......: Version_17.06.20
+## 	Maintainers .............: Havard Rue <hrue@r-inla.org>
+## 	                         : Finn Lindgren <finn.lindgren@gmail.com>
+## 	                         : Daniel Simpson <dp.simpson@gmail.com>
+## 	                         : Andrea Riebler <andrea.riebler@math.ntnu.no>
+## 	                         : Elias Teixeira Krainski <elias.krainski@math.ntnu.no>
+## 	                         : Geir-Arne Fuglstad <fulgstad@math.ntnu.no>
+## 	Main web-page ...........: www.r-inla.org
+## 	Download-page ...........: inla.r-inla-download.org
+## 	Email support ...........: help@r-inla.org
+## 	                         : r-inla-discussion-group@googlegroups.com
+## 	Source-code .............: bitbucket.org/hrue/r-inla
+```
+
+
+
+
+
 
 This example is to illustrate a problem with the posterior predictive sampling algorithm in R-INLA.
 
