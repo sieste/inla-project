@@ -73,5 +73,30 @@ A lot of thinning will be necessary to get pseudo-independent samples.
 I am wondering if there are options I could set to improve the sampler? 
 
 
+## Avoiding the `seed` argument in `inla.posterior.sample`
 
+The near-perfect correlation of the posterior predictive samples seems to disappear when I remove the `seed` argument in `inla.posterior.sample`:
+
+
+```r
+# posterior predictive samples
+n_sampls = 50
+set.seed(321)
+inla_sampls_noseed = inla.posterior.sample(n=n_sampls, result=inla_result) 
+
+# extract "Predictor" output
+i_pred = str_c('Predictor:', str_pad(1:n, 3, 'left', '0'))
+inla_sampls_noseed = inla_sampls_noseed %>% 
+  setNames(1:n_sampls) %>%
+  map_df( ~ .x$latent[i_pred,1]) %>%
+  mutate(i = 1:n) %>%
+  gather(key='sample', value='y', -i) %>%
+  mutate_if(is.character, as.integer)
+
+# plot predictive samples
+ggplot(data=inla_sampls_noseed, aes(x=i, y=y, group=sample)) + geom_line(aes(colour=sample)) +
+  scale_colour_continuous(type='viridis') + coord_cartesian(xlim=c(90, n))
+```
+
+![plot of chunk inla-rw1-noseed](figure/sampler-problem/inla-rw1-noseed-1.png)
 
