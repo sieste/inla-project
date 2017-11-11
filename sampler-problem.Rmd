@@ -9,7 +9,7 @@ layout: default
 
 **The behavior described here is due to a bug in INLA which has been fixed in version 17.11.11.**
 
-(see the [thread](https://groups.google.com/forum/#!topic/r-inla-discussion-group/y7dAzbrXb6o) on the INLA discussion group)
+(see also the [thread on the INLA discussion group](https://groups.google.com/forum/#!topic/r-inla-discussion-group/y7dAzbrXb6o))
 
 
 
